@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Tunnelrat</string>
+    <string name="widget_desc">Wake or shut down your PC</string>
+    <string name="tile_wake">Wake PC</string>
+    <string name="tile_off">PC off</string>
+    <string name="share_label">Send to PC</string>
+    <string name="control_label">Tunnelrat: control from PC</string>
+    <string name="control_summary">Lets your paired PC tap, swipe and type while this phone\'s screen is shown on it.</string>
+    <string name="control_desc">While you show this phone\'s screen on your paired PC with Tunnelrat, this lets the PC\'s mouse and keyboard tap, swipe, go back/home and type into the focused field. It does nothing at any other time and never reads or sends your screen content by itself.</string>
+</resources>

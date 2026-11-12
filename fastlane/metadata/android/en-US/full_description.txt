@@ -1,0 +1,30 @@
+<p>Tunnelrat links your Android phone with your Ubuntu PCs (GNOME). It talks only to PCs you paired with a QR code, over an encrypted connection (mutual TLS with pinned certificates), on your own network or over a VPN such as Tailscale. No accounts, no cloud, no tracking.</p>
+
+<p><b>Needs the Tunnelrat PC part</b> (free software, in the same repository) installed on each PC: <tt>pc/setup.sh</tt> sets it up.</p>
+
+<p><b>Control the PC</b></p>
+<ul>
+<li>Touchpad and keyboard: tap to click, two-finger scroll, three-finger swipes for the overview and workspaces; typing follows the PC's keyboard layout</li>
+<li>Wake on LAN, lock, screen off, restart and shut down; log in at the PC's login screen from the phone</li>
+<li>Media controls with the playing track and volume (keeps your left/right balance)</li>
+<li>Presentation mode: big next/previous buttons, volume keys as a clicker, a pointer you move by tilting the phone</li>
+</ul>
+
+<p><b>Screens</b></p>
+<ul>
+<li>See and control the PC's screen on the phone</li>
+<li>Show the phone's screen on the PC and control it with the PC's mouse and keyboard</li>
+</ul>
+
+<p><b>Share</b></p>
+<ul>
+<li>The phone as a drive on the PC: the whole phone or one folder</li>
+<li>One clipboard across your phone and PCs</li>
+<li>Send links and files from any app to the PC</li>
+<li>Phone notifications and battery on the PC; reply to messages from the PC</li>
+<li>Quick settings tiles and a home screen widget to wake or shut down the PC</li>
+</ul>
+
+<p>Pair several PCs: the phone stays connected to all of them and finds them again on the network when their address changes.</p>
+
+<p><b>Permissions, and why:</b> camera (scanning the pairing code), nearby devices / local network (reaching the PC), notifications (the connection status), notification access (only if you turn on sharing notifications), all files access (only for the whole-phone drive), screen capture (only while you show the phone on the PC), and an optional accessibility service that lets the PC tap and type on the phone, active only while you show the phone's screen on the PC.</p>

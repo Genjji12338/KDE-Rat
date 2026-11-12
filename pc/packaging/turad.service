@@ -1,0 +1,13 @@
+# systemd user unit (pc/setup.sh installs it). By hand:
+#   cp turad.service ~/.config/systemd/user/ && systemctl --user enable --now turad
+[Unit]
+Description=Tunnelrat PC daemon
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/turad
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

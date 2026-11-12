@@ -1,0 +1,33 @@
+[package]
+name = "turad"
+description = "Tunnelrat PC daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tura-proto.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+evdev = "0.13.2"
+zbus = { version = "6.2.1", default-features = false, features = ["tokio", "proxy"] }
+futures-util = "0.3.34"
+tokio-tungstenite = "0.30.0"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "logging", "tls12"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem", "crypto"] }
+sha2 = "0.11.1"
+hex = "0.4.3"
+rand = "0.10.3"
+serde.workspace = true
+rustls-pki-types = "1.16.0"
+if-addrs = "0.15.0"
+qrcode = { version = "0.14.1", default-features = false }
+base64 = "0.23.1"
+xkbcommon-dl = "0.4.2"
+fuser = { version = "0.18.0", default-features = false }
+libc = "0.2.191"

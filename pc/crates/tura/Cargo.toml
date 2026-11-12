@@ -1,0 +1,15 @@
+[package]
+name = "tura"
+description = "Tunnelrat command-line tool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tura-proto.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+clap.workspace = true
+futures-util = "0.3.34"
+tokio-tungstenite = "0.30.0"
+qrcode = { version = "0.14.1", default-features = false }

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Tunnelrat
+Comment=Phone and PC link: devices, screens, shared mouse and keyboard
+Exec=tunnelrat-app
+Icon=dev.tunnelrat.Tunnelrat
+Terminal=false
+Categories=Network;Utility;GTK;
+Keywords=phone;remote;screen;pair;mouse;keyboard;
+StartupNotify=true

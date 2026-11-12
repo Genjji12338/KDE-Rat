@@ -1,0 +1,1 @@
+First public version: pairing several PCs, touchpad and keyboard, power and Wake on LAN, login from the phone, media, presentation mode, PC screen on the phone and phone screen on the PC, phone as a drive, shared clipboard, sharing, notifications with replies, battery, tiles and widget.

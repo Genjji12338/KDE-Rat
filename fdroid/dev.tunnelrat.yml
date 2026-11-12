@@ -1,0 +1,38 @@
+# Draft build recipe for F-Droid (goes to fdroiddata as metadata/dev.tunnelrat.yml).
+# Before submitting: replace REPO_URL with the public repository, push the
+# v0.2.0 tag, and test with `fdroid build -v -l dev.tunnelrat` (see README).
+Categories:
+  - Connectivity
+  - System
+License: GPL-3.0-or-later
+SourceCode: REPO_URL
+IssueTracker: REPO_URL/issues
+Changelog: REPO_URL/tags
+
+AutoName: Tunnelrat
+
+RepoType: git
+Repo: REPO_URL.git
+
+Builds:
+  - versionName: 0.2.0
+    versionCode: 2
+    commit: v0.2.0
+    subdir: android/app
+    sudo:
+      # The build asks Gradle for a Java 21 toolchain; give it Debian's.
+      - apt-get update
+      - apt-get install -y openjdk-21-jdk-headless
+      - update-java-alternatives -a
+    gradle:
+      - yes
+
+# Optional, for reproducible builds signed with the developer's key (then
+# users can switch between F-Droid's APK and the project's own releases):
+# AllowedAPKSigningKeys: de05b2d9af7639f1611337bd7ccb255d5c58166298265d2bd1d643fb90ea4b6e
+# Binaries: REPO_URL/releases/download/v%v/tunnelrat-%v.apk
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 0.2.0
+CurrentVersionCode: 2

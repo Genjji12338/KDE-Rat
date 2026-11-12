@@ -1,0 +1,14 @@
+<!-- Foreground: cream / grey / dark arches fading into the tunnel, red eyes. Geometry measured from art/icon.png (1024 px), fitted so the apex and leg ends sit on the 33dp safe-zone circle (round masks never clip). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.0732" android:scaleY="0.0732" android:translateX="16.56" android:translateY="9.79">
+        <path android:strokeColor="#FFF3EBE0" android:strokeWidth="62" android:strokeLineCap="round"
+            android:pathData="M163.5,818V531.5A348,348 0 0,1 859.5,531.5V818" />
+        <path android:strokeColor="#FF8E8A82" android:strokeWidth="52" android:strokeLineCap="round"
+            android:pathData="M286.5,818V593.5A225,225 0 0,1 736.5,593.5V818" />
+        <path android:strokeColor="#FF555450" android:strokeWidth="42" android:strokeLineCap="round"
+            android:pathData="M388.5,818V655A123,123 0 0,1 634.5,655V818" />
+        <path android:fillColor="#FFC8331F"
+            android:pathData="M441,736.5a29.5,29.5 0 1,0 59,0a29.5,29.5 0 1,0 -59,0ZM523,736.5a29.5,29.5 0 1,0 59,0a29.5,29.5 0 1,0 -59,0Z" />
+    </group>
+</vector>

@@ -1,0 +1,18 @@
+// Lets members of the "tunnelrat" group shut down, reboot, suspend and lock
+// without a password prompt, so turad (a user service) can do it remotely.
+// Install: sudo groupadd -f tunnelrat && sudo usermod -aG tunnelrat $USER
+//          sudo cp 50-tunnelrat-power.rules /etc/polkit-1/rules.d/
+polkit.addRule(function (action, subject) {
+    var allowed = [
+        "org.freedesktop.login1.power-off",
+        "org.freedesktop.login1.power-off-multiple-sessions",
+        "org.freedesktop.login1.reboot",
+        "org.freedesktop.login1.reboot-multiple-sessions",
+        "org.freedesktop.login1.suspend",
+        "org.freedesktop.login1.suspend-multiple-sessions",
+        "org.freedesktop.login1.lock-sessions"
+    ];
+    if (allowed.indexOf(action.id) >= 0 && subject.isInGroup("tunnelrat")) {
+        return polkit.Result.YES;
+    }
+});

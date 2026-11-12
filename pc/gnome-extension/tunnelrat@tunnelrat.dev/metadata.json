@@ -1,0 +1,7 @@
+{
+  "uuid": "tunnelrat@tunnelrat.dev",
+  "name": "Tunnelrat",
+  "description": "Clipboard bridge and phone status for the Tunnelrat daemon (turad). Only turad may use the clipboard bridge.",
+  "shell-version": ["48", "49", "50"],
+  "version": 1
+}

@@ -1,0 +1,7 @@
+# Lets members of the "uinput" group create virtual input devices for turad,
+# also at the login screen (logind's per-seat access only covers whoever is
+# logged in there). It doesn't grant reading real keyboards or mice.
+# Install: sudo groupadd -f uinput && sudo usermod -aG uinput $USER
+#          sudo cp 60-tunnelrat-uinput.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"

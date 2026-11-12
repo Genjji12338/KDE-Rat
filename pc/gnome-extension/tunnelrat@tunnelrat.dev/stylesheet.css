@@ -1,0 +1,20 @@
+/* One "phone status" chip, visibly separate from the system's own battery. */
+.tunnelrat-chip {
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 999px;
+    padding: 0 8px 0 6px;
+    spacing: 4px;
+}
+.tunnelrat-chip .system-status-icon {
+    icon-size: 16px;
+    padding: 0;
+}
+
+/* Several chips side by side. */
+.tunnelrat-row {
+    spacing: 6px;
+}
+
+.tunnelrat-menu-title {
+    font-weight: bold;
+}

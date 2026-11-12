@@ -1,0 +1,818 @@
+#!/usr/bin/env python3
+# Tunnelrat — the PC app. SPDX-License-Identifier: GPL-3.0-or-later
+"""Tunnelrat on the PC: devices and pairing, screens and power, the shared
+mouse layout, settings and a status checklist. Talks to turad over its
+owner-only Unix socket (the same one the `tura` command uses)."""
+
+import base64
+import json
+import math
+import os
+import socket
+import struct
+import threading
+import time
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+
+APP_ID = "dev.tunnelrat.Tunnelrat"
+POLL_SECONDS = 3
+
+
+# ── turad connection ─────────────────────────────────────────────────────
+
+
+class TuradError(Exception):
+    pass
+
+
+def socket_path():
+    return os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "tunnelrat.sock")
+
+
+class Turad:
+    """One request = one short WebSocket connection, like `tura`: hello, the
+    message, a ping; replies are collected until the pong."""
+
+    @staticmethod
+    def request(msg=None, timeout=40):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect(socket_path())
+        except OSError as e:
+            raise TuradError("turad isn't running (systemctl --user start turad)") from e
+        try:
+            key = base64.b64encode(os.urandom(16)).decode()
+            s.sendall(
+                (
+                    "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                    f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+                ).encode()
+            )
+            head = b""
+            while b"\r\n\r\n" not in head:
+                chunk = s.recv(1024)
+                if not chunk:
+                    raise TuradError("turad closed the connection")
+                head += chunk
+            if b" 101 " not in head.split(b"\r\n", 1)[0]:
+                raise TuradError("turad refused the connection")
+            buf = head.split(b"\r\n\r\n", 1)[1]
+            Turad._send(s, {"type": "hello", "protocol": 1, "device_name": "tunnelrat-app", "device_kind": "pc"})
+            if msg is not None:
+                Turad._send(s, msg)
+            Turad._send(s, {"type": "ping"})
+            replies = []
+            while True:
+                opcode, payload, buf = Turad._recv(s, buf)
+                if opcode == 1:
+                    m = json.loads(payload)
+                    if m.get("type") == "pong":
+                        break
+                    if m.get("type") not in ("hello", "pc_info", "now_playing"):
+                        replies.append(m)
+                elif opcode == 9:
+                    Turad._frame(s, 0xA, payload)
+                elif opcode == 8:
+                    break
+            try:
+                Turad._frame(s, 0x8, b"")
+            except OSError:
+                pass
+            errors = [r["message"] for r in replies if r.get("type") == "error"]
+            if errors:
+                raise TuradError(errors[0])
+            return replies
+        finally:
+            s.close()
+
+    @staticmethod
+    def _send(s, obj):
+        Turad._frame(s, 0x1, json.dumps(obj).encode())
+
+    @staticmethod
+    def _frame(s, opcode, data):
+        mask = os.urandom(4)
+        n = len(data)
+        if n < 126:
+            head = struct.pack("!BB", 0x80 | opcode, 0x80 | n)
+        elif n < 65536:
+            head = struct.pack("!BBH", 0x80 | opcode, 0x80 | 126, n)
+        else:
+            head = struct.pack("!BBQ", 0x80 | opcode, 0x80 | 127, n)
+        s.sendall(head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+
+    @staticmethod
+    def _recv(s, buf):
+        def need(k):
+            nonlocal buf
+            while len(buf) < k:
+                chunk = s.recv(65536)
+                if not chunk:
+                    raise TuradError("turad closed the connection")
+                buf += chunk
+
+        need(2)
+        b0, b1 = buf[0], buf[1]
+        n = b1 & 0x7F
+        off = 2
+        if n == 126:
+            need(4)
+            n = struct.unpack("!H", buf[2:4])[0]
+            off = 4
+        elif n == 127:
+            need(10)
+            n = struct.unpack("!Q", buf[2:10])[0]
+            off = 10
+        masked = b1 & 0x80
+        if masked:
+            need(off + 4)
+            mask = buf[off : off + 4]
+            off += 4
+        need(off + n)
+        payload = buf[off : off + n]
+        if masked:
+            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        return b0 & 0x0F, payload, buf[off + n :]
+
+
+def call(msg, done=None, fail=None):
+    """Runs a turad request off the UI thread; `done(replies)` / `fail(error)` on it."""
+
+    def work():
+        try:
+            r = Turad.request(msg)
+            if done:
+                GLib.idle_add(done, r)
+        except Exception as e:  # noqa: BLE001 — shown to the user
+            if fail:
+                GLib.idle_add(fail, str(e))
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def first(replies, kind):
+    return next((r for r in replies if r.get("type") == kind), None)
+
+
+# ── Devices ──────────────────────────────────────────────────────────────
+
+
+def device_subtitle(d, peer=False):
+    parts = ["PC" if d.get("kind") == "pc" else "Phone" if d.get("kind") == "phone" else "Device"]
+    parts.append("connected" if d.get("online") else "offline")
+    if d.get("battery") is not None:
+        parts.append(f"{d['battery']}%" + (" · charging" if d.get("charging") else ""))
+    if d.get("drive"):
+        parts.append("drive mounted")
+    if peer:
+        parts.append("this PC joined it")
+    return " · ".join(parts)
+
+
+class DevicesPage(Adw.Bin):
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.page = Adw.PreferencesPage()
+        self.set_child(self.page)
+        self.groups = []
+        self.devices = []
+        self.peer = None
+        self.signature = None
+
+    def refresh(self):
+        call({"type": "list_devices"}, self.show, self.win.error)
+
+    def show(self, replies):
+        d = first(replies, "devices") or {}
+        devices, peer = d.get("devices", []), d.get("peer")
+        self.devices, self.peer = devices, peer
+        sig = json.dumps([devices, peer], sort_keys=True)
+        if sig == self.signature:
+            return False
+        self.signature = sig
+        for g in self.groups:
+            self.page.remove(g)
+        self.groups = []
+
+        group = Adw.PreferencesGroup(title="Paired devices", description="Phones and PCs that can connect to this PC.")
+        pair = Gtk.Button(label="Pair a device", css_classes=["suggested-action", "pill"], valign=Gtk.Align.CENTER)
+        pair.connect("clicked", lambda _b: PairDialog(self.win).present(self.win))
+        group.set_header_suffix(pair)
+        if not devices:
+            group.add(Adw.ActionRow(title="Nothing paired yet", subtitle="Pair your phone, or another PC with `tura join`."))
+        for dev in devices:
+            group.add(self.row(dev))
+        self.page.add(group)
+        self.groups.append(group)
+
+        if peer:
+            g2 = Adw.PreferencesGroup(title="Joined PC", description="The PC this one joined; shared mouse, clipboard and power.")
+            g2.add(self.row(peer, peer=True))
+            self.page.add(g2)
+            self.groups.append(g2)
+        return False
+
+    def row(self, d, peer=False):
+        is_pc = d.get("kind") == "pc"
+        row = Adw.ActionRow(title=GLib.markup_escape_text(d["name"]), subtitle=device_subtitle(d, peer))
+        row.add_prefix(Gtk.Image(icon_name="computer-symbolic" if is_pc else "phone-symbolic", pixel_size=24))
+        online = bool(d.get("online"))
+
+        screen = Gtk.Button(
+            icon_name="video-display-symbolic",
+            tooltip_text="View its screen" if is_pc else "Show its screen on this PC",
+            valign=Gtk.Align.CENTER,
+            css_classes=["flat"],
+            sensitive=online,
+        )
+        name = d["name"]
+        if is_pc:
+            screen.connect("clicked", lambda _b: self.win.run({"type": "screen_view", "device": name}, f"Asking {name} to share its screen…"))
+        else:
+            screen.connect(
+                "clicked",
+                lambda _b: self.win.run({"type": "for_device", "device": name, "message": {"type": "mirror_request"}}, f"Asking {name} to show its screen…"),
+            )
+        row.add_suffix(screen)
+
+        if d.get("drive"):
+            drive = Gtk.Button(icon_name="folder-symbolic", tooltip_text="Open its files", valign=Gtk.Align.CENTER, css_classes=["flat"])
+            path = d["drive"]
+            drive.connect("clicked", lambda _b: Gio.AppInfo.launch_default_for_uri(GLib.filename_to_uri(path), None))
+            row.add_suffix(drive)
+
+        menu = Gio.Menu()
+        if is_pc:
+            power = Gio.Menu()
+            for label, action in (("Lock", "lock"), ("Screen off", "screen_off"), ("Restart", "reboot"), ("Shut down", "shutdown")):
+                power.append(label, f"win.power::{json.dumps([name, action])}")
+            menu.append_section(None, power)
+        if not peer:
+            danger = Gio.Menu()
+            danger.append("Unpair", f"win.unpair::{json.dumps([name, d['fingerprint']])}")
+            menu.append_section(None, danger)
+        more = Gtk.MenuButton(icon_name="view-more-symbolic", menu_model=menu, valign=Gtk.Align.CENTER, css_classes=["flat"])
+        more.set_sensitive(menu.get_n_items() > 0)
+        row.add_suffix(more)
+        return row
+
+
+class PairDialog(Adw.Dialog):
+    def __init__(self, win):
+        super().__init__(title="Pair a device", content_width=420)
+        self.win = win
+        self.qr = []
+        self.expires = 0
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, margin_start=24, margin_end=24, margin_bottom=24)
+        self.area = Gtk.DrawingArea(content_width=300, content_height=300, halign=Gtk.Align.CENTER)
+        self.area.set_draw_func(self.draw)
+        box.append(self.area)
+        self.hint = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, label="Getting a code…")
+        box.append(self.hint)
+        self.copy = Gtk.Button(label="Copy code for another PC", halign=Gtk.Align.CENTER, css_classes=["pill"], sensitive=False)
+        box.append(self.copy)
+        self.timer = Gtk.Label(css_classes=["dim-label"])
+        box.append(self.timer)
+        view.set_content(box)
+        self.set_child(view)
+        call({"type": "pair_begin"}, self.got, self.failed)
+        self.tick = GLib.timeout_add_seconds(1, self.countdown)
+        self.connect("closed", lambda *_: GLib.source_remove(self.tick))
+
+    def got(self, replies):
+        o = first(replies, "pair_offer")
+        if not o:
+            return self.failed("turad didn't answer with a code")
+        self.qr = o.get("qr", [])
+        self.expires = time.monotonic() + o.get("expires_in_secs", 300)
+        uri = o["uri"]
+        self.hint.set_label("Phone: open Tunnelrat and tap Scan QR code.\nAnother PC: run tura join with the code below.")
+        self.copy.set_sensitive(True)
+        self.copy.connect("clicked", lambda _b: (Gdk.Display.get_default().get_clipboard().set(f"tura join '{uri}'"), self.win.toast("Copied: tura join …")))
+        self.area.queue_draw()
+        return False
+
+    def failed(self, err):
+        self.hint.set_label(f"Couldn't get a code: {err}")
+        return False
+
+    def countdown(self):
+        if self.expires:
+            left = int(self.expires - time.monotonic())
+            self.timer.set_label(f"Valid for {left // 60}:{left % 60:02d}, one device" if left > 0 else "Expired: close and pair again")
+        return True
+
+    def draw(self, _area, cr, w, h):
+        if not self.qr:
+            return
+        n = len(self.qr) + 8  # quiet zone
+        cell = min(w, h) / n
+        ox, oy = (w - cell * n) / 2, (h - cell * n) / 2
+        cr.set_source_rgb(1, 1, 1)
+        cr.rectangle(ox, oy, cell * n, cell * n)
+        cr.fill()
+        cr.set_source_rgb(0, 0, 0)
+        for y, row in enumerate(self.qr):
+            for x, c in enumerate(row):
+                if c == "1":
+                    cr.rectangle(ox + (x + 4) * cell, oy + (y + 4) * cell, cell + 0.5, cell + 0.5)
+        cr.fill()
+
+
+# ── Layout ───────────────────────────────────────────────────────────────
+
+SIDES = ("left", "right", "up", "down")
+
+
+class LayoutPage(Adw.Bin):
+    """This PC's monitors to scale; drag the other PC to the edge where your
+    mouse should cross over. Saved like `tura layout`."""
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.pcs = []
+        self.entries = {}
+        self.current = None
+        self.place = {"side": "down", "from": 0, "to": 100}
+        self.drag_from = None
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=18, margin_bottom=18, margin_start=18, margin_end=18)
+        top = Gtk.Box(spacing=12)
+        self.pick = Gtk.DropDown(model=Gtk.StringList(), valign=Gtk.Align.CENTER)
+        self.pick.connect("notify::selected", lambda *_: self.select())
+        top.append(Gtk.Label(label="Joined PC", css_classes=["heading"]))
+        top.append(self.pick)
+        top.append(Gtk.Box(hexpand=True))
+        top.append(Gtk.Label(label="Edge covered", css_classes=["dim-label"]))
+        self.width = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 10, 100, 5)
+        self.width.set_size_request(180, -1)
+        self.width.connect("value-changed", lambda s: self.resize(s.get_value()))
+        top.append(self.width)
+        box.append(top)
+
+        self.area = Gtk.DrawingArea(vexpand=True, hexpand=True)
+        self.area.set_draw_func(self.draw)
+        drag = Gtk.GestureDrag()
+        drag.connect("drag-begin", self.on_begin)
+        drag.connect("drag-update", self.on_update)
+        drag.connect("drag-end", lambda *_: self.save())
+        self.area.add_controller(drag)
+        box.append(self.area)
+        self.note = Gtk.Label(
+            wrap=True,
+            css_classes=["dim-label"],
+            label="Drag the other PC to the edge of this PC's screens where the mouse should cross over. Saved right away.",
+        )
+        box.append(self.note)
+        self.empty = Adw.StatusPage(
+            icon_name="input-mouse-symbolic",
+            title="No joined PC",
+            description="Join another PC to this one (`tura pair` here, `tura join` there) to share mouse and keyboard.",
+        )
+        self.stack = Gtk.Stack()
+        self.stack.add_named(self.empty, "empty")
+        self.stack.add_named(box, "editor")
+        self.set_child(self.stack)
+
+    def refresh(self, devices):
+        pcs = [d["name"] for d in devices if d.get("kind") == "pc"]
+        if pcs != self.pcs:
+            self.pcs = pcs
+            self.pick.set_model(Gtk.StringList.new(pcs))
+        self.stack.set_visible_child_name("editor" if pcs else "empty")
+        call({"type": "get_layouts"}, self.got_layouts, self.win.error)
+
+    def got_layouts(self, replies):
+        lay = first(replies, "layouts") or {}
+        self.entries = {e["device"]: e for e in lay.get("entries", [])}
+        if self.drag_from is None:
+            self.select()
+        return False
+
+    def select(self):
+        i = self.pick.get_selected()
+        if i == Gtk.INVALID_LIST_POSITION or i >= len(self.pcs):
+            return
+        self.current = self.pcs[i]
+        e = self.entries.get(self.current, {"side": "right", "from": 0, "to": 100})
+        self.place = {"side": e["side"], "from": e["from"], "to": e["to"]}
+        self.width.set_value(self.place["to"] - self.place["from"])
+        self.area.queue_draw()
+
+    def monitors(self):
+        mons = Gdk.Display.get_default().get_monitors()
+        rects = []
+        for i in range(mons.get_n_items()):
+            m = mons.get_item(i)
+            g = m.get_geometry()
+            rects.append((g.x, g.y, g.width, g.height, m.get_connector() or ""))
+        return rects or [(0, 0, 1920, 1080, "")]
+
+    def geometry(self, w, h):
+        """Scale + offset so the monitors fit with room for the other PC around them."""
+        mons = self.monitors()
+        x0 = min(m[0] for m in mons)
+        y0 = min(m[1] for m in mons)
+        x1 = max(m[0] + m[2] for m in mons)
+        y1 = max(m[1] + m[3] for m in mons)
+        bw, bh = x1 - x0, y1 - y0
+        s = min(w / (bw * 1.9), h / (bh * 1.9))
+        ox = (w - bw * s) / 2 - x0 * s
+        oy = (h - bh * s) / 2 - y0 * s
+        return mons, (x0 * s + ox, y0 * s + oy, bw * s, bh * s), s, ox, oy
+
+    def other_rect(self, box):
+        bx, by, bw, bh = box
+        side, f, t = self.place["side"], self.place["from"] / 100, self.place["to"] / 100
+        ow, oh = bw * 0.42, bh * 0.42
+        gap = 6
+        if side in ("left", "right"):
+            cy = by + bh * (f + t) / 2
+            x = bx - ow - gap if side == "left" else bx + bw + gap
+            return x, cy - oh / 2, ow, oh
+        cx = bx + bw * (f + t) / 2
+        y = by - oh - gap if side == "up" else by + bh + gap
+        return cx - ow / 2, y, ow, oh
+
+    def draw(self, _a, cr, w, h):
+        if not self.current:
+            return
+        mons, box, s, ox, oy = self.geometry(w, h)
+        fg = self.get_color()
+        for x, y, mw, mh, name in mons:
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.12)
+            cr.rectangle(x * s + ox, y * s + oy, mw * s, mh * s)
+            cr.fill_preserve()
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.5)
+            cr.set_line_width(1.5)
+            cr.stroke()
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.7)
+            cr.move_to(x * s + ox + 8, y * s + oy + 18)
+            cr.show_text(name)
+        # The crossing: highlight that stretch of the edge.
+        bx, by, bw, bh = box
+        side, f, t = self.place["side"], self.place["from"] / 100, self.place["to"] / 100
+        cr.set_source_rgba(0.95, 0.6, 0.15, 1)
+        cr.set_line_width(4)
+        if side == "left":
+            cr.move_to(bx, by + bh * f)
+            cr.line_to(bx, by + bh * t)
+        elif side == "right":
+            cr.move_to(bx + bw, by + bh * f)
+            cr.line_to(bx + bw, by + bh * t)
+        elif side == "up":
+            cr.move_to(bx + bw * f, by)
+            cr.line_to(bx + bw * t, by)
+        else:
+            cr.move_to(bx + bw * f, by + bh)
+            cr.line_to(bx + bw * t, by + bh)
+        cr.stroke()
+        x, y, ow, oh = self.other_rect(box)
+        cr.set_source_rgba(0.95, 0.6, 0.15, 0.25)
+        cr.rectangle(x, y, ow, oh)
+        cr.fill_preserve()
+        cr.set_source_rgba(0.95, 0.6, 0.15, 1)
+        cr.set_line_width(2)
+        cr.stroke()
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 1)
+        cr.set_font_size(15)
+        ext = cr.text_extents(self.current)
+        cr.move_to(x + (ow - ext.width) / 2, y + oh / 2 + ext.height / 2)
+        cr.show_text(self.current)
+
+    def on_begin(self, _g, x, y):
+        self.drag_from = (x, y)
+        self.move_to(x, y)
+
+    def on_update(self, _g, dx, dy):
+        if self.drag_from:
+            self.move_to(self.drag_from[0] + dx, self.drag_from[1] + dy)
+
+    def move_to(self, px, py):
+        _mons, (bx, by, bw, bh), *_ = self.geometry(self.area.get_width(), self.area.get_height())
+        cx, cy = bx + bw / 2, by + bh / 2
+        # Which edge: compare the pointer's offset from the centre, scaled to the box.
+        dx, dy = (px - cx) / bw, (py - cy) / bh
+        side = ("right" if dx > 0 else "left") if abs(dx) > abs(dy) else ("down" if dy > 0 else "up")
+        along = (py - by) / bh if side in ("left", "right") else (px - bx) / bw
+        length = (self.place["to"] - self.place["from"]) / 100
+        start = min(max(along - length / 2, 0), 1 - length)
+        self.place = {"side": side, "from": round(start * 100), "to": round((start + length) * 100)}
+        self.area.queue_draw()
+
+    def resize(self, pct):
+        mid = (self.place["from"] + self.place["to"]) / 2
+        length = max(10, min(100, pct))
+        start = min(max(mid - length / 2, 0), 100 - length)
+        new = {"side": self.place["side"], "from": round(start), "to": round(start + length)}
+        if new != self.place:
+            self.place = new
+            self.area.queue_draw()
+            GLib.timeout_add(400, self.save_if, dict(new))
+
+    def save_if(self, place):
+        if place == self.place:
+            self.save()
+        return False
+
+    def save(self):
+        self.drag_from = None
+        if not self.current:
+            return
+        p = self.place
+        if p["to"] <= p["from"]:
+            return
+        msg = {"type": "set_layout", "device": self.current, "side": p["side"], "from": p["from"], "to": p["to"]}
+        call(msg, lambda _r: self.win.toast(f"{self.current}: {p['side']} edge, {p['from']}–{p['to']}%"), self.win.error)
+
+
+# ── Settings ─────────────────────────────────────────────────────────────
+
+
+class SettingsPage(Adw.Bin):
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.settings = None
+        self.page = Adw.PreferencesPage()
+        self.set_child(self.page)
+
+        g = Adw.PreferencesGroup(title="Sharing")
+        self.clip = Adw.SwitchRow(title="Clipboard sync", subtitle="One clipboard across this PC, your phone and joined PCs")
+        self.mouse = Adw.SwitchRow(title="Shared mouse and keyboard", subtitle="Move the mouse over to joined PCs (Deskflow)")
+        self.suspend = Adw.SwitchRow(title="Allow sleep", subtitle="Some graphics cards never wake up from it; test before relying on it")
+        for r in (self.clip, self.mouse, self.suspend):
+            g.add(r)
+            r.connect("notify::active", lambda *_: self.save())
+        self.page.add(g)
+
+        self.chips = Adw.PreferencesGroup(title="Top bar", description="Which devices show as a chip (with battery) in the top bar.")
+        self.page.add(self.chips)
+        self.chip_rows = []
+        self.loading = False
+
+    def refresh(self, devices):
+        self.devices = devices
+        call({"type": "get_settings"}, self.got, self.win.error)
+
+    def got(self, replies):
+        s = first(replies, "settings")
+        if not s:
+            return False
+        s = s["settings"]
+        self.loading = True
+        self.settings = s
+        self.clip.set_active(s.get("clipboard", True))
+        self.mouse.set_active(s.get("shared_input", True))
+        self.suspend.set_active(s.get("allow_suspend", False))
+        for r in self.chip_rows:
+            self.chips.remove(r)
+        self.chip_rows = []
+        hidden = set(s.get("hidden_chips", []))
+        for d in self.devices:
+            row = Adw.SwitchRow(title=GLib.markup_escape_text(d["name"]), subtitle="Phone" if d.get("kind") != "pc" else "PC", active=d["fingerprint"] not in hidden)
+            row.fingerprint = d["fingerprint"]
+            row.connect("notify::active", lambda *_: self.save())
+            self.chips.add(row)
+            self.chip_rows.append(row)
+        if not self.devices:
+            row = Adw.ActionRow(title="No paired devices")
+            self.chips.add(row)
+            self.chip_rows.append(row)
+        self.loading = False
+        return False
+
+    def save(self):
+        if self.loading or self.settings is None:
+            return
+        s = dict(self.settings)
+        s["clipboard"] = self.clip.get_active()
+        s["shared_input"] = self.mouse.get_active()
+        s["allow_suspend"] = self.suspend.get_active()
+        s["hidden_chips"] = [r.fingerprint for r in self.chip_rows if hasattr(r, "fingerprint") and not r.get_active()]
+        self.settings = s
+        call({"type": "set_settings", "settings": s}, None, self.win.error)
+
+
+class StatusPage(Adw.Bin):
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.page = Adw.PreferencesPage()
+        self.group = Adw.PreferencesGroup(title="Status", description="What works on this PC, and how to fix what doesn't.")
+        again = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Check again", valign=Gtk.Align.CENTER, css_classes=["flat"])
+        again.connect("clicked", lambda _b: self.refresh())
+        self.group.set_header_suffix(again)
+        self.page.add(self.group)
+        self.set_child(self.page)
+        self.rows = []
+
+    def refresh(self):
+        call({"type": "get_status"}, self.show, self.win.error)
+
+    def show(self, replies):
+        st = first(replies, "status") or {}
+        for r in self.rows:
+            self.group.remove(r)
+        self.rows = []
+        for item in st.get("items", []):
+            row = Adw.ActionRow(title=GLib.markup_escape_text(item["name"]), subtitle=GLib.markup_escape_text(item["detail"]))
+            icon = Gtk.Image(icon_name="emblem-ok-symbolic" if item["ok"] else "dialog-warning-symbolic")
+            icon.add_css_class("success" if item["ok"] else "warning")
+            row.add_prefix(icon)
+            self.group.add(row)
+            self.rows.append(row)
+        return False
+
+
+# ── Window ───────────────────────────────────────────────────────────────
+
+
+class Window(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Tunnelrat", default_width=760, default_height=640)
+        self.toasts = Adw.ToastOverlay()
+        view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        self.stack = Adw.ViewStack()
+        switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE)
+        header.set_title_widget(switcher)
+        view.add_top_bar(header)
+
+        self.devices_page = DevicesPage(self)
+        self.layout_page = LayoutPage(self)
+        self.settings_page = SettingsPage(self)
+        self.status_page = StatusPage(self)
+        self.stack.add_titled_with_icon(self.devices_page, "devices", "Devices", "phone-symbolic")
+        self.stack.add_titled_with_icon(self.layout_page, "layout", "Layout", "input-mouse-symbolic")
+        self.stack.add_titled_with_icon(self.settings_page, "settings", "Settings", "emblem-system-symbolic")
+        self.stack.add_titled_with_icon(self.status_page, "status", "Status", "dialog-information-symbolic")
+        self.stack.connect("notify::visible-child-name", lambda *_: self.on_page())
+
+        bottom = Adw.ViewSwitcherBar(stack=self.stack)
+        view.add_bottom_bar(bottom)
+        view.set_content(self.stack)
+        self.toasts.set_child(view)
+        self.set_content(self.toasts)
+
+        # Narrow windows: tabs at the bottom.
+        bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 560sp"))
+        bp.add_setter(switcher, "visible", False)
+        bp.add_setter(bottom, "reveal", True)
+        self.add_breakpoint(bp)
+
+        for name, handler in (("power", self.on_power), ("unpair", self.on_unpair)):
+            a = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
+            a.connect("activate", handler)
+            self.add_action(a)
+
+        self.last_error = None
+        self.poll()
+        GLib.timeout_add_seconds(POLL_SECONDS, self.poll)
+
+    def poll(self):
+        if self.get_visible():
+            self.devices_page.refresh()
+            GLib.timeout_add(300, self.on_page_data)
+        return True
+
+    def on_page_data(self):
+        devices = self.devices_page.devices
+        page = self.stack.get_visible_child_name()
+        if page == "layout" and self.layout_page.drag_from is None:
+            self.layout_page.refresh(devices)
+        return False
+
+    def on_page(self):
+        devices = self.devices_page.devices
+        page = self.stack.get_visible_child_name()
+        if page == "layout":
+            self.layout_page.refresh(devices)
+        elif page == "settings":
+            self.settings_page.refresh(devices)
+        elif page == "status":
+            self.status_page.refresh()
+
+    def run(self, msg, note=None):
+        if note:
+            self.toast(note)
+        call(msg, None, self.error)
+
+    def on_power(self, _a, param):
+        name, action = json.loads(param.get_string())
+        self.run({"type": "for_device", "device": name, "message": {"type": "power", "action": action}}, f"{name}: {action.replace('_', ' ')}")
+
+    def on_unpair(self, _a, param):
+        name, fp = json.loads(param.get_string())
+        dialog = Adw.AlertDialog(heading=f"Unpair {name}?", body="It's disconnected at once and has to pair again to connect.")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("unpair", "Unpair")
+        dialog.set_response_appearance("unpair", Adw.ResponseAppearance.DESTRUCTIVE)
+
+        def chosen(_d, response):
+            if response == "unpair":
+                call({"type": "unpair", "selector": fp}, lambda _r: (self.toast(f"Unpaired {name}"), self.devices_page.refresh()), self.error)
+
+        dialog.connect("response", chosen)
+        dialog.present(self)
+
+    def toast(self, text):
+        self.toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(text), timeout=3))
+        return False
+
+    def error(self, text):
+        # Polling repeats; show each distinct problem once.
+        if text != self.last_error:
+            self.last_error = text
+            self.toast(text)
+        return False
+
+
+class App(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+
+    def do_activate(self):
+        win = self.get_active_window() or Window(self)
+        win.present()
+
+
+# ── Reply window (from a phone notification's "Reply" button) ────────────
+
+
+def reply_window(device, key, title):
+    """`tunnelrat-app --reply --device FP --key KEY --title T`: one small window
+    that sends a reply through the phone notification's own reply field."""
+    app = Adw.Application(application_id=None, flags=Gio.ApplicationFlags.NON_UNIQUE)
+
+    def activate(a):
+        win = Adw.ApplicationWindow(application=a, title="Reply", default_width=460)
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_start=18, margin_end=18, margin_bottom=18)
+        box.append(Gtk.Label(label=title, wrap=True, xalign=0, css_classes=["heading"]))
+        row = Gtk.Box(spacing=8)
+        entry = Gtk.Entry(placeholder_text="Your reply", hexpand=True)
+        send = Gtk.Button(label="Send", css_classes=["suggested-action"])
+        row.append(entry)
+        row.append(send)
+        box.append(row)
+        status = Gtk.Label(wrap=True, xalign=0, css_classes=["dim-label"])
+        box.append(status)
+        view.set_content(box)
+        win.set_content(view)
+
+        def sent(_replies):
+            win.close()
+            return False
+
+        def failed(err):
+            status.set_label(f"Not sent: {err}")
+            send.set_sensitive(True)
+            entry.set_sensitive(True)
+            return False
+
+        def go(*_):
+            text = entry.get_text().strip()
+            if not text:
+                return
+            send.set_sensitive(False)
+            entry.set_sensitive(False)
+            status.set_label("Sending…")
+            msg = {"type": "for_device", "device": device, "message": {"type": "phone_reply", "key": key, "text": text}}
+            call(msg, sent, failed)
+
+        entry.connect("activate", go)
+        send.connect("clicked", go)
+        win.present()
+        entry.grab_focus()
+
+    app.connect("activate", activate)
+    app.run([])
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    if "--reply" in sys.argv:
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--reply", action="store_true")
+        ap.add_argument("--device", required=True)
+        ap.add_argument("--key", required=True)
+        ap.add_argument("--title", default="Reply")
+        args = ap.parse_args()
+        reply_window(args.device, args.key, args.title)
+    else:
+        App().run(None)
