@@ -1,6 +1,5 @@
 # Build recipe for F-Droid (goes to fdroiddata as metadata/dev.tunnelrat.yml).
-# Before submitting: replace https://github.com/I232826/tunnelrat with the public repository, push the
-# v0.2.0 tag, and test with `fdroid build -v -l dev.tunnelrat` (see README).
+# Test it before submitting: `fdroid build -v -l dev.tunnelrat` in an fdroiddata checkout.
 Categories:
   - Connectivity
   - System
