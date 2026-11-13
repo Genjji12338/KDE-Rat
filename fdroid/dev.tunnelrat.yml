@@ -26,10 +26,11 @@ Builds:
     gradle:
       - yes
 
-# Optional, for reproducible builds signed with the developer's key (then
-# users can switch between F-Droid's APK and the project's own releases):
-# AllowedAPKSigningKeys: de05b2d9af7639f1611337bd7ccb255d5c58166298265d2bd1d643fb90ea4b6e
-# Binaries: https://github.com/I232826/tunnelrat/releases/download/v%v/tunnelrat-%v.apk
+# Reproducible (verified with fdroid build + apksigcopier for 0.2.0): F-Droid
+# ships the release APK from GitHub with the developer's signature, so it is
+# interchangeable with the project's own APK.
+AllowedAPKSigningKeys: de05b2d9af7639f1611337bd7ccb255d5c58166298265d2bd1d643fb90ea4b6e
+Binaries: https://github.com/I232826/tunnelrat/releases/download/v%v/tunnelrat-%v.apk
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags

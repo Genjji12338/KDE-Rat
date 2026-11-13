@@ -72,4 +72,5 @@ Later, not committed: phone as webcam. (Access over the Ratlines mesh is handled
 
 ## F-Droid (prepared 2026-11-12)
 - Done: store texts, icon, 4 phone screenshots, changelog, v0.2.0 tag (fastlane/metadata/android/en-US), draft recipe (fdroid/dev.tunnelrat.yml), no non-free dependencies, no Google dependency metadata in the APK.
-- Missing: a public repository (blocker), a test build with fdroidserver, the merge request to fdroiddata. Risk: very new build tools (Gradle 9.6, AGP 9.4, compileSdk 37) may not be supported by F-Droid's build server yet.
+- Done too: public repository (github.com/I232826/tunnelrat), test build in F-Droid's buildserver image (succeeds, scanner clean), reproducible: F-Droid's build equals the signed release byte for byte (apksigcopier).
+- Missing: the signed APK as a GitHub release asset for v0.2.0, then the merge request to fdroiddata on GitLab.
