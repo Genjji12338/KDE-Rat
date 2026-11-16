@@ -11,6 +11,15 @@ pc/        Rust workspace
 android/   Kotlin + Jetpack Compose app (dev.tunnelrat)
 ```
 
+## Install (phone)
+In the F-Droid app: Settings → Repositories → **+**, and add
+
+    https://i232826.github.io/tunnelrat-fdroid/repo?fingerprint=448AC2C9C7C73A1D920CD6CA7703B81ADDCF9FD198E8C40F1B4D9173FE9D32E9
+
+(or scan the QR code on [that page](https://i232826.github.io/tunnelrat-fdroid/repo/)), then
+install Tunnelrat. The APK is also on the [releases page](https://github.com/I232826/tunnelrat/releases);
+both are signed with the same key, so either one updates the other.
+
 ## Install (PC)
 From the repository (needs Rust: https://rustup.rs):
 ```bash
@@ -188,6 +197,9 @@ tura power lock --device <other-pc>         # any power action, on either side
   [fdroiddata](https://gitlab.com/fdroid/fdroiddata): fill in the public repository URL,
   test it with F-Droid's tools (`fdroid build -v -l dev.tunnelrat` in an fdroiddata
   checkout), then open the merge request.
+- **Own F-Droid repository:** `fdroid/update-repo.sh` adds the APKs from `dist/` to the
+  repository at https://github.com/I232826/tunnelrat-fdroid (working copy with its index
+  signing key in `~/tunnelrat-fdroid/`, never pushed: back it up too) and pushes it.
 
 ## License
 Tunnelrat (PC daemon, CLI, GNOME extension and Android app) is licensed under the
