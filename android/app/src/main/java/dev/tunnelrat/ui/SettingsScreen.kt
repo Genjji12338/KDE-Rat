@@ -107,7 +107,7 @@ fun SettingsScreen(tura: TuraCore, onUnpair: () -> Unit, onClose: () -> Unit) {
                 Icon(Icons.Rounded.ArrowBack, contentDescription = "Back", tint = Tura.Text)
             }
             Spacer(Modifier.width(8.dp))
-            Text("Settings", color = Tura.Text, fontSize = 26.sp, fontWeight = FontWeight.Black)
+            Text("Settings", color = Tura.Text, fontSize = 26.sp, fontWeight = FontWeight.Bold, fontFamily = Tura.Display)
         }
 
         Section {

@@ -1,6 +1,7 @@
 /* One "phone status" chip, visibly separate from the system's own battery. */
+/* Burrowfolk: the top bar is dark, so the "ink" theme's cream outline. */
 .tunnelrat-chip {
-    border: 1px solid rgba(255, 255, 255, 0.35);
+    border: 1.5px solid rgba(242, 236, 223, 0.4);
     border-radius: 999px;
     padding: 0 8px 0 6px;
     spacing: 4px;
@@ -16,5 +17,6 @@
 }
 
 .tunnelrat-menu-title {
+    font-family: "Space Grotesk", sans-serif;
     font-weight: bold;
 }

@@ -235,7 +235,7 @@ fun HomeScreen(vm: TuraViewModel, onMirror: () -> Unit = {}) {
 private fun Header(state: TuraClient.State, net: TuraCore.Net, paired: Boolean, pcName: String?, links: List<TuraCore.PcLink>, selected: String?, onSelect: (String) -> Unit, onPairAnother: () -> Unit, onUnpair: () -> Unit, onSettings: () -> Unit, onPresent: () -> Unit, onGamepad: () -> Unit, onCast: () -> Unit, mirroring: Boolean, onMirror: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("tunnelrat", color = Tura.Text, fontSize = 30.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
+        Text("tunnelrat", color = Tura.Text, fontSize = 30.sp, fontWeight = FontWeight.Bold, fontFamily = Tura.Display, letterSpacing = (-1.2).sp)
         Spacer(Modifier.weight(1f))
         if (paired) {
             Box(
@@ -384,7 +384,7 @@ private fun PairCard(modifier: Modifier, onScan: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(Icons.Rounded.QrCode2, contentDescription = null, tint = Tura.Amber, modifier = Modifier.size(72.dp))
-        Text("Pair with your PC", color = Tura.Text, fontSize = 22.sp, fontWeight = FontWeight.Black)
+        Text("Pair with your PC", color = Tura.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = Tura.Display)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("On the PC, run  ", color = Tura.Muted, fontSize = 14.sp)
             Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Tura.Bg).padding(horizontal = 12.dp, vertical = 6.dp)) {
@@ -399,7 +399,7 @@ private fun PairCard(modifier: Modifier, onScan: () -> Unit) {
         ) {
             Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, tint = Tura.Bg)
             Spacer(Modifier.width(10.dp))
-            Text("Scan QR code", color = Tura.Bg, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            Text("Scan QR code", color = Tura.Bg, fontSize = 17.sp, fontWeight = FontWeight.Bold, fontFamily = Tura.Display)
         }
         Text("or scan it with your camera app and tap the link", color = Tura.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
     }

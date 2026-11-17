@@ -1,0 +1,4 @@
+- New look: cream by day, ink in the dark, following your phone's setting
+- New fonts (Inter, Space Grotesk), outlined cards, red only where it matters
+- The widget follows light and dark too
+- PC app: the same look, with its own Appearance setting

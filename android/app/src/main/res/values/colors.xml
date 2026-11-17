@@ -1,0 +1,10 @@
+<resources>
+    <!-- Burrowfolk "Cream · daylight"; values-night has "Ink · basement". -->
+    <color name="tura_bg">#FFF2ECDF</color>
+    <color name="tura_card">#F0F8F4EB</color>
+    <color name="tura_line">#FFD6CCBA</color>
+    <color name="tura_text">#FF141414</color>
+    <color name="tura_primary">#FF141414</color>
+    <color name="tura_on_primary">#FFF2ECDF</color>
+    <color name="tura_red">#FFC8321F</color>
+</resources>

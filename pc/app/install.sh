@@ -21,5 +21,10 @@ GdkPixbuf.Pixbuf.new_from_file_at_size(sys.argv[1], int(sys.argv[2]), int(sys.ar
 " "$icon" "$size" "$icons/${size}x${size}/apps/dev.tunnelrat.Tunnelrat.png"
 done
 gtk-update-icon-cache -q -t "$icons" 2>/dev/null || true
+# The app's fonts (Inter, Space Grotesk; SIL OFL, see fonts/).
+fonts="$HOME/.local/share/fonts/tunnelrat"
+mkdir -p "$fonts"
+cp "$here"/fonts/*.ttf "$here"/fonts/OFL-*.txt "$fonts/"
+fc-cache -f "$fonts" >/dev/null 2>&1 || true
 update-desktop-database -q "$apps" 2>/dev/null || true
 echo "Installed: Tunnelrat is in the app grid."

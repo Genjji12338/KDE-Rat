@@ -14,6 +14,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -51,7 +53,8 @@ fun Touchpad(
     Box(
         modifier
             .background(if (active) Tura.SurfaceHigh else Tura.Surface, shape)
-            .border(1.dp, if (active) Tura.AmberDim else Tura.Line, shape)
+            .border(1.5.dp, if (active) Tura.AmberDim else Tura.Line, shape)
+            .drawBehind { swarmRing() }
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -116,4 +119,21 @@ fun Touchpad(
             )
         }
     }
+}
+
+/**
+ * Burrowfolk watermark: the swarm ring (a circle of 24 dots) faint in the
+ * middle, and the tiny red eye in the bottom-right corner.
+ */
+private fun DrawScope.swarmRing() {
+    val r = minOf(size.width, size.height) * 0.2f
+    val dot = r * 0.07f
+    val c = center
+    val ink = Tura.Text.copy(alpha = 0.16f)
+    for (i in 0 until 24) {
+        val a = i * (2 * Math.PI / 24)
+        drawCircle(ink, dot, Offset(c.x + r * kotlin.math.cos(a).toFloat(), c.y + r * kotlin.math.sin(a).toFloat()))
+    }
+    val eye = 3.5.dp.toPx()
+    drawCircle(Tura.Danger, eye, Offset(size.width - 22.dp.toPx(), size.height - 20.dp.toPx()))
 }

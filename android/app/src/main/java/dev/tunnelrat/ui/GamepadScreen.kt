@@ -261,7 +261,7 @@ private fun ControlLook(c: PadControl, pressed: Boolean, knob: Offset = Offset.Z
                 Text(
                     c.label,
                     color = if (accent) Tura.Bg else Tura.Text,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.Bold, fontFamily = Tura.Display,
                     fontSize = when (c.kind) {
                         Kind.Face -> if (accent) 26.sp else 22.sp
                         Kind.Small -> 12.sp

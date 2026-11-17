@@ -162,7 +162,7 @@ private fun BigButton(label: String, icon: ImageVector, accent: Boolean, modifie
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(icon, contentDescription = null, tint = if (accent) Tura.Bg else Tura.Text, modifier = Modifier.size(if (accent) 64.dp else 40.dp))
-            Text(label, color = if (accent) Tura.Bg else Tura.Text, fontSize = if (accent) 26.sp else 18.sp, fontWeight = FontWeight.Black)
+            Text(label, color = if (accent) Tura.Bg else Tura.Text, fontSize = if (accent) 26.sp else 18.sp, fontWeight = FontWeight.Bold, fontFamily = Tura.Display)
         }
     }
 }

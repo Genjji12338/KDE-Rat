@@ -565,6 +565,13 @@ class SettingsPage(Adw.Bin):
             r.connect("notify::active", lambda *_: self.save())
         self.page.add(g)
 
+        look = Adw.PreferencesGroup(title="Appearance")
+        self.appearance = Adw.ComboRow(title="Colours", subtitle="Cream by day, ink in the basement", model=Gtk.StringList.new([a[0] for a in APPEARANCES]))
+        self.appearance.set_selected(load_appearance())
+        self.appearance.connect("notify::selected", lambda r, _p: save_appearance(r.get_selected()))
+        look.add(self.appearance)
+        self.page.add(look)
+
         self.leave = Adw.PreferencesGroup(
             title="Lock when I leave",
             description="Lock this PC when the phone has been gone for half a minute: out of Wi-Fi and Bluetooth range, or switched off.",
@@ -771,9 +778,103 @@ class Window(Adw.ApplicationWindow):
         return False
 
 
+# ── Burrowfolk look: cream (light) / ink (dark), like the phone app ─────
+
+BURROWFOLK_COLORS = {
+    # name: (cream · daylight, ink · basement)
+    "window-bg-color": ("#F2ECDF", "#141414"), "window-fg-color": ("#141414", "#F2ECDF"),
+    "view-bg-color": ("#F2ECDF", "#141414"), "view-fg-color": ("#141414", "#F2ECDF"),
+    "headerbar-bg-color": ("#F2ECDF", "#141414"), "headerbar-fg-color": ("#141414", "#F2ECDF"),
+    "headerbar-backdrop-color": ("#F2ECDF", "#141414"), "headerbar-shade-color": ("transparent", "transparent"),
+    "sidebar-bg-color": ("#F2ECDF", "#141414"), "sidebar-fg-color": ("#141414", "#F2ECDF"),
+    "card-bg-color": ("#F8F4EB", "#1C1B19"), "card-fg-color": ("#141414", "#F2ECDF"), "card-shade-color": ("transparent", "transparent"),
+    "dialog-bg-color": ("#F8F4EB", "#1C1B19"), "dialog-fg-color": ("#141414", "#F2ECDF"),
+    "popover-bg-color": ("#F8F4EB", "#1C1B19"), "popover-fg-color": ("#141414", "#F2ECDF"),
+    "thumbnail-bg-color": ("#F8F4EB", "#1C1B19"),
+    "accent-bg-color": ("#141414", "#F2ECDF"), "accent-fg-color": ("#F2ECDF", "#141414"), "accent-color": ("#141414", "#F2ECDF"),
+    "destructive-bg-color": ("#C8321F", "#EA5A48"), "destructive-fg-color": ("#F2ECDF", "#141414"), "destructive-color": ("#C8321F", "#EA5A48"),
+    "success-bg-color": ("#141414", "#F2ECDF"), "success-fg-color": ("#F2ECDF", "#141414"), "success-color": ("#141414", "#F2ECDF"),
+    "warning-bg-color": ("#C8321F", "#EA5A48"), "warning-fg-color": ("#F2ECDF", "#141414"), "warning-color": ("#C8321F", "#EA5A48"),
+    "error-bg-color": ("#C8321F", "#EA5A48"), "error-fg-color": ("#F2ECDF", "#141414"), "error-color": ("#C8321F", "#EA5A48"),
+    "border-color": ("#D6CCBA", "#34312C"),
+}
+
+BURROWFOLK_RULES = """
+window, dialog, popover { font-family: "Inter", sans-serif; }
+.title-1, .title-2, .title-3, .title-4, .heading, windowtitle .title, preferencesgroup .heading, statuspage .title {
+  font-family: "Space Grotesk", sans-serif; font-weight: 700;
+}
+/* Cards and lists outlined in warm grey, no floating shadows. */
+.boxed-list, .card, list.boxed-list-separate > row {
+  box-shadow: 0 0 0 1.5px var(--border-color);
+}
+headerbar { box-shadow: inset 0 -1px var(--border-color); }
+"""
+
+
+def burrowfolk_css(dark):
+    """Cream (light) or ink (dark) as libadwaita colour variables, plus the rules."""
+    i = 1 if dark else 0
+    # Both spellings: CSS variables (libadwaita 1.6+) and named colours (older).
+    root = "".join(f"--{k}: {v[i]}; " for k, v in BURROWFOLK_COLORS.items())
+    named = "".join(f"@define-color {k.replace('-color', '').replace('-', '_')}_color {v[i]};\n" for k, v in BURROWFOLK_COLORS.items() if v[i] != "transparent")
+    return named + ":root { " + root + "}\n" + BURROWFOLK_RULES
+
+
+_burrowfolk = None
+
+
+def apply_burrowfolk():
+    """Follows libadwaita's dark/light (the desktop setting, or the app's own
+    choice in Settings) and swaps the palette when it changes."""
+    global _burrowfolk
+    display = Gdk.Display.get_default()
+    if not display or _burrowfolk:
+        return
+    _burrowfolk = Gtk.CssProvider()
+    style = Adw.StyleManager.get_default()
+
+    def load(*_):
+        _burrowfolk.load_from_string(burrowfolk_css(style.get_dark()))
+
+    load()
+    style.connect("notify::dark", load)
+    Gtk.StyleContext.add_provider_for_display(display, _burrowfolk, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+
+APPEARANCES = [("Like the system", Adw.ColorScheme.DEFAULT), ("Cream", Adw.ColorScheme.FORCE_LIGHT), ("Ink", Adw.ColorScheme.FORCE_DARK)]
+
+
+def appearance_file():
+    return os.path.join(GLib.get_user_config_dir(), "tunnelrat", "appearance")
+
+
+def load_appearance():
+    try:
+        with open(appearance_file()) as f:
+            i = int(f.read().strip())
+    except (OSError, ValueError):
+        i = 0
+    i = i if 0 <= i < len(APPEARANCES) else 0
+    Adw.StyleManager.get_default().set_color_scheme(APPEARANCES[i][1])
+    return i
+
+
+def save_appearance(i):
+    os.makedirs(os.path.dirname(appearance_file()), exist_ok=True)
+    with open(appearance_file(), "w") as f:
+        f.write(str(i))
+    Adw.StyleManager.get_default().set_color_scheme(APPEARANCES[i][1])
+
+
 class App(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        load_appearance()
+        apply_burrowfolk()
 
     def do_activate(self):
         win = self.get_active_window() or Window(self)
@@ -789,6 +890,8 @@ def reply_window(device, key, title):
     app = Adw.Application(application_id=None, flags=Gio.ApplicationFlags.NON_UNIQUE)
 
     def activate(a):
+        load_appearance()
+        apply_burrowfolk()
         win = Adw.ApplicationWindow(application=a, title="Reply", default_width=460)
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())

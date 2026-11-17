@@ -231,7 +231,7 @@ private fun CameraScanner(onResult: (String) -> Unit) {
                 if (found != null) "Got it" else "Scan the pairing code",
                 color = Tura.Text,
                 fontSize = 22.sp,
-                fontWeight = FontWeight.Black,
+                fontWeight = FontWeight.Bold, fontFamily = Tura.Display,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Run ", color = Tura.Muted, fontSize = 14.sp)
@@ -321,7 +321,7 @@ private fun NoCamera(onOpenSettings: () -> Unit, onRetry: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(Icons.Rounded.NoPhotography, contentDescription = null, tint = Tura.Muted, modifier = Modifier.size(64.dp))
-        Text("Camera access needed", color = Tura.Text, fontSize = 20.sp, fontWeight = FontWeight.Black)
+        Text("Camera access needed", color = Tura.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = Tura.Display)
         Text(
             "Tunnelrat only uses the camera to read the pairing QR code. Nothing is recorded or sent anywhere.",
             color = Tura.Muted,

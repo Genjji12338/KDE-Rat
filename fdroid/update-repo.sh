@@ -30,6 +30,9 @@ cd "$work"
 git add -A
 git ls-files | grep -qE '^(config\.yml|keystore\.p12)$' && { echo "Refusing: signing files staged" >&2; exit 1; }
 git diff --cached --quiet && { echo "Nothing new to publish."; exit 0; }
-git commit -qm "Update repository"
+# Commit as the project, never as whatever identity this machine has.
+git -c user.name=anyrat -c user.email=i873248076234896724@gmail.com commit -qm "Update repository
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git push -q
 echo "Published; GitHub Pages updates in a minute or two."

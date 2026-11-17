@@ -1,0 +1,9 @@
+<resources>
+    <color name="tura_bg">#FF141414</color>
+    <color name="tura_card">#F01C1B19</color>
+    <color name="tura_line">#FF34312C</color>
+    <color name="tura_text">#FFF2ECDF</color>
+    <color name="tura_primary">#FFF2ECDF</color>
+    <color name="tura_on_primary">#FF141414</color>
+    <color name="tura_red">#FFEA5A48</color>
+</resources>

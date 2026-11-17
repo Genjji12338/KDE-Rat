@@ -37,6 +37,17 @@ Builds:
     gradle:
       - yes
 
+  - versionName: 0.4.0
+    versionCode: 4
+    commit: v0.4.0
+    subdir: android/app
+    sudo:
+      - apt-get update
+      - apt-get install -y openjdk-21-jdk-headless
+      - update-java-alternatives -a
+    gradle:
+      - yes
+
 # Reproducible (verified with fdroid build + apksigcopier for 0.2.0): F-Droid
 # ships the release APK from GitHub with the developer's signature, so it is
 # interchangeable with the project's own APK.
@@ -45,5 +56,5 @@ Binaries: https://github.com/I232826/tunnelrat/releases/download/v%v/tunnelrat-%
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 0.3.0
-CurrentVersionCode: 3
+CurrentVersion: 0.4.0
+CurrentVersionCode: 4
