@@ -63,6 +63,11 @@ enum Cmd {
         /// The phone's name (see `tura devices`).
         device: String,
     },
+    /// Ring a phone so you can find it (loud, even on silent).
+    Ring {
+        /// The phone's name (see `tura devices`).
+        device: String,
+    },
     /// View and control another PC's screen (opens Remmina).
     Screen {
         /// The other PC's name (see `tura devices`).
@@ -245,6 +250,11 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Mirror { device } => report(send(Some(Message::ForDevice { device, message: Box::new(Message::MirrorRequest) })).await?),
+        Cmd::Ring { device } => {
+            report(send(Some(Message::ForDevice { device: device.clone(), message: Box::new(Message::Ring) })).await?)?;
+            println!("{device} is ringing; stop it on the phone.");
+            Ok(())
+        }
         Cmd::Screen { device } => {
             println!("Asking {device} to share its screen…");
             report(send(Some(Message::ScreenView { device })).await?)

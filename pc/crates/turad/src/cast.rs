@@ -158,6 +158,71 @@ impl Cast {
         Ok(())
     }
 
+    /// Pointer movement, buttons and scrolling from the viewer, sent through
+    /// the same remote-desktop session as [`Cast::pointer`]: one virtual
+    /// device, in order. (Mixing in turad's uinput mouse let a click arrive
+    /// before the pointer had moved, and split drags across two devices.)
+    /// Returns false for other messages.
+    pub async fn input(&self, m: &tura_proto::Message) -> Result<bool> {
+        use tura_proto::{Message, MouseButton, PressState};
+        match *m {
+            Message::PointerMove { dx, dy } => {
+                let (dx, dy) = (f64::from(dx), f64::from(dy));
+                match &self.source {
+                    Source::Mutter { session, .. } => self.rd(session, "NotifyPointerMotionRelative", &(dx, dy)).await?,
+                    Source::Portal { session, .. } => self.portal("NotifyPointerMotion", &(session, opts(), dx, dy)).await?,
+                }
+            }
+            Message::PointerButton { button, state } => {
+                // evdev codes
+                let code: i32 = match button {
+                    MouseButton::Left => 0x110,
+                    MouseButton::Right => 0x111,
+                    MouseButton::Middle => 0x112,
+                };
+                let presses: &[bool] = match state {
+                    PressState::Down => &[true],
+                    PressState::Up => &[false],
+                    PressState::Click => &[true, false],
+                };
+                for &down in presses {
+                    match &self.source {
+                        Source::Mutter { session, .. } => self.rd(session, "NotifyPointerButton", &(code, down)).await?,
+                        Source::Portal { session, .. } => self.portal("NotifyPointerButton", &(session, opts(), code, u32::from(down))).await?,
+                    }
+                }
+            }
+            Message::Scroll { dx, dy } => {
+                // Smooth scrolling: 10 units = one wheel click (libinput's scale);
+                // dy > 0 scrolls down, like the protocol.
+                let (dx, dy) = (f64::from(dx) * 10.0, f64::from(dy) * 10.0);
+                match &self.source {
+                    // SOURCE_CONTINUOUS (1 << 3): smooth, no kinetic follow-up.
+                    Source::Mutter { session, .. } => self.rd(session, "NotifyPointerAxis", &(dx, dy, 1u32 << 3)).await?,
+                    Source::Portal { session, .. } => self.portal("NotifyPointerAxis", &(session, opts(), dx, dy, 0u32)).await?,
+                }
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    async fn rd<B>(&self, session: &OwnedObjectPath, method: &str, body: &B) -> Result<()>
+    where
+        B: serde::Serialize + zbus::zvariant::DynamicType,
+    {
+        self.conn.call_method(Some(M_RD), session.as_str(), Some(M_RD_SESSION), method, body).await?;
+        Ok(())
+    }
+
+    async fn portal<B>(&self, method: &str, body: &B) -> Result<()>
+    where
+        B: serde::Serialize + zbus::zvariant::DynamicType,
+    {
+        self.conn.call_method(Some(PORTAL), PATH, Some(RD), method, body).await?;
+        Ok(())
+    }
+
     /// Ends the session; the encoder is killed when `self` drops.
     pub async fn stop(self) {
         let _ = match &self.source {
@@ -166,6 +231,10 @@ impl Cast {
         };
         info!("cast stopped");
     }
+}
+
+fn opts() -> HashMap<&'static str, Variant<'static>> {
+    HashMap::new()
 }
 
 /// A D-Bus property as an owned variant.

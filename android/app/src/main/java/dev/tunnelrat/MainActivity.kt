@@ -25,7 +25,8 @@ class MainActivity : ComponentActivity() {
     /**
      * ACCESS_LOCAL_NETWORK: Android 17 blocks LAN traffic (silently: connects
      * just time out) without it. POST_NOTIFICATIONS: the background-connection
-     * status notification.
+     * status notification. BLUETOOTH_CONNECT: reaching the PC over Bluetooth
+     * when the network can't.
      */
     private val askPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
         if (res[Manifest.permission.ACCESS_LOCAL_NETWORK] == false) vm.notify("Tunnelrat needs “Nearby devices” access to reach your PC")
@@ -52,6 +53,7 @@ class MainActivity : ComponentActivity() {
         val wanted = buildList {
             if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+            if (Build.VERSION.SDK_INT >= 31) add(Manifest.permission.BLUETOOTH_CONNECT)
         }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (wanted.isNotEmpty()) askPermissions.launch(wanted.toTypedArray())
         setContent {
@@ -59,8 +61,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (Ringer.ringing) Ringer.stop(this) // found it
+    }
+
     /** While the app is open, the phone's volume buttons control the PC's volume. */
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // Gamepad mode: volume keys are the shoulder buttons (held = held).
+        if (vm.gaming.value && padShoulder(keyCode, down = true)) return true
         // Presenting: volume keys are a clicker (down = next, up = previous).
         // Key repeat is ignored so holding a key doesn't skip slides.
         if (vm.presenting.value && (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP)) {
@@ -76,6 +85,22 @@ class MainActivity : ComponentActivity() {
         }
         // Only swallow the key if it actually went to the PC; otherwise the phone's own volume changes.
         return vm.volume(step) || super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        if (vm.gaming.value && padShoulder(keyCode, down = false)) return true
+        return super.onKeyUp(keyCode, event)
+    }
+
+    /** Volume down = LB, volume up = RB; false for other keys. */
+    private fun padShoulder(keyCode: Int, down: Boolean): Boolean {
+        val bit = when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_DOWN -> dev.tunnelrat.gamepad.Pad.LB
+            KeyEvent.KEYCODE_VOLUME_UP -> dev.tunnelrat.gamepad.Pad.RB
+            else -> return false
+        }
+        vm.pad.press(bit, down)
+        return true
     }
 
     /** Phone → PC clipboard: Android only allows reading while we're focused. */

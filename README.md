@@ -144,6 +144,31 @@ Home, Recent apps and Notifications. Control needs Settings → Accessibility �
 to turad: `cp pc/viewer/tura-viewer ~/.cargo/bin/` (needs `python3-gi`, GTK 4 and
 the `gtk4paintablesink` + `avdec_h264` GStreamer elements).
 
+## Bluetooth (no network)
+When the phone can't reach the PC over the network (no Wi-Fi, PC on another network) and
+the PC has Bluetooth switched on, the app connects over Bluetooth instead: same pairing,
+same encryption (TLS runs end to end), every feature except the PC's screen (too slow).
+It moves back to Wi-Fi by itself once the PC answers there again. Set it up once per PC
+while connected over Wi-Fi: phone app → Settings → Bluetooth → **Set up Bluetooth**, then
+confirm Android's "Pair?" prompt. (The PC opens Bluetooth pairing for a minute, only for
+this phone, and restores its Bluetooth settings afterwards.) Keep the phone's Bluetooth on.
+
+## Gamepad mode
+Controller icon on the phone's home screen (or the PC menu → Gamepad mode): the phone becomes
+an Xbox 360 controller on the PC (virtual uinput device, one per phone), so games and Steam use
+it without setup. Two sticks (the left one centres where your thumb lands; tap a stick for
+L3/R3), d-pad, A/B/X/Y, LB/RB, LT/RT, View/Home/Menu; volume keys are LB/RB. Gyro aiming
+(top bar) steers the right stick by turning the phone. The pencil opens the editor: drag any
+control, tap it to resize, Done saves (per phone). Works over Bluetooth too, with a bit more lag.
+
+## Find my phone, lock when I leave
+- **Ring a phone:** bell button in the Tunnelrat app, "Ring it" in the top-bar menu, or
+  `tura ring <phone>`. It rings at full alarm volume (also on silent) and vibrates for up to
+  a minute; stop it from the notification or by opening the app.
+- **Lock when I leave:** Tunnelrat app → Settings → Lock when I leave, per phone. The PC locks
+  once that phone has been gone for 30 s (out of Wi-Fi and Bluetooth range, or switched off;
+  noticing a phone vanished can take up to ~45 s more). Not after the PC slept, not at the login screen.
+
 ## Log in from the phone (after Wake on LAN)
 turad runs from boot (user lingering), so a woken PC is reachable before anyone logs
 in. The app then shows "<PC> is at the login screen" with a password field; turad

@@ -174,7 +174,8 @@ impl Drop for OnlineGuard<'_> {
 #[derive(Debug, Clone)]
 enum Peer {
     /// Remote phone, identified by its client-cert fingerprint.
-    Phone { addr: SocketAddr, fingerprint: String },
+    /// `addr`: where it connects from (IP:port, or "Bluetooth <MAC>").
+    Phone { addr: String, fingerprint: String },
     /// This user's own `tura` CLI over the admin socket.
     Local,
 }
@@ -243,6 +244,8 @@ pub async fn run(listen: SocketAddr, policy: power::Policy) -> Result<()> {
         tokio::spawn(async move { c.shell.set_hidden(&s.hidden_chips).await });
     }
 
+    tokio::spawn(crate::bluetooth::run(acceptor.clone(), ctx.clone()));
+
     let tcp = TcpListener::bind(listen).await.with_context(|| format!("binding {listen}"))?;
     info!("listening for phones on {listen} (mTLS)");
 
@@ -269,18 +272,7 @@ pub async fn run(listen: SocketAddr, policy: power::Policy) -> Result<()> {
                 let (acceptor, ctx) = (acceptor.clone(), ctx.clone());
                 tokio::spawn(async move {
                     let _ = stream.set_nodelay(true);
-                    let tls = match tokio::time::timeout(Duration::from_secs(10), acceptor.accept(stream)).await {
-                        Ok(Ok(t)) => t,
-                        Ok(Err(e)) => return warn!(%addr, "TLS handshake failed: {e}"),
-                        Err(_) => return warn!(%addr, "TLS handshake timed out"),
-                    };
-                    let Some(cert) = tls.get_ref().1.peer_certificates().and_then(|c| c.first()) else {
-                        return warn!(%addr, "no client certificate");
-                    };
-                    let peer = Peer::Phone { addr, fingerprint: identity::fingerprint(cert) };
-                    if let Err(e) = session(tls, peer.clone(), ctx).await {
-                        warn!(?peer, "session ended: {e:#}");
-                    }
+                    accept_phone(&acceptor, stream, addr.to_string(), ctx).await;
                 });
             }
             res = unix.accept() => {
@@ -293,6 +285,55 @@ pub async fn run(listen: SocketAddr, policy: power::Policy) -> Result<()> {
                 });
             }
         }
+    }
+}
+
+/// How long a phone may stay gone before "lock when I leave" locks the PC.
+/// Covers hopping between Wi-Fi and Bluetooth, and short Wi-Fi drops.
+const GONE_GRACE: Duration = Duration::from_secs(30);
+
+/// "Lock when I leave": `fp` just went offline; lock unless it comes back
+/// (or the PC goes to sleep, which drops every phone) within [`GONE_GRACE`].
+async fn lock_if_still_gone(ctx: Arc<Ctx>, fp: String, name: String) {
+    let mut sleep = ctx.sleep.subscribe();
+    let slept = tokio::time::timeout(GONE_GRACE, async {
+        loop {
+            match sleep.recv().await {
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => return,
+                Err(broadcast::error::RecvError::Closed) => std::future::pending::<()>().await,
+            }
+        }
+    })
+    .await
+    .is_ok();
+    if slept || ctx.online.lock().unwrap().contains_key(&fp) || !ctx.settings.lock().unwrap().lock_when_gone.contains(&fp) {
+        return;
+    }
+    if crate::deskflow::graphical_session().await.is_none() {
+        return; // nobody logged in
+    }
+    match power::run(tura_proto::PowerAction::Lock, ctx.policy()).await {
+        Ok(()) => {
+            info!(%name, "phone gone: locked this PC");
+            let _ = ctx.notifier.show("Tunnelrat", "system-lock-screen-symbolic", "Locked", &format!("{name} left, so this PC was locked."), 0).await;
+        }
+        Err(e) => warn!(%name, "phone gone, but locking failed: {e:#}"),
+    }
+}
+
+/// TLS handshake with a phone or PC (over TCP or Bluetooth), then its session.
+pub(crate) async fn accept_phone<S: AsyncRead + AsyncWrite + Unpin>(acceptor: &TlsAcceptor, stream: S, addr: String, ctx: Arc<Ctx>) {
+    let tls = match tokio::time::timeout(Duration::from_secs(10), acceptor.accept(stream)).await {
+        Ok(Ok(t)) => t,
+        Ok(Err(e)) => return warn!(%addr, "TLS handshake failed: {e}"),
+        Err(_) => return warn!(%addr, "TLS handshake timed out"),
+    };
+    let Some(cert) = tls.get_ref().1.peer_certificates().and_then(|c| c.first()) else {
+        return warn!(%addr, "no client certificate");
+    };
+    let peer = Peer::Phone { addr, fingerprint: identity::fingerprint(cert) };
+    if let Err(e) = session(tls, peer.clone(), ctx).await {
+        warn!(?peer, "session ended: {e:#}");
     }
 }
 
@@ -373,6 +414,7 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(stream: S, peer: Peer, ctx: 
     let mut st = SessionState {
         name: my_fp.as_deref().and_then(|fp| ctx.pairing.is_paired(fp)).unwrap_or_else(|| "Phone".into()),
         files: crate::files::Receiver::default(),
+        gamepad: None,
         out_tx,
         drive: None,
         deskflow_screen: None,
@@ -410,6 +452,9 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(stream: S, peer: Peer, ctx: 
         drop(_online);
         if !ctx.online.lock().unwrap().contains_key(fp) {
             ctx.shell.set_device_status(fp, &st.name, st.kind, None, false, false).await;
+            if ctx.settings.lock().unwrap().lock_when_gone.contains(fp) {
+                tokio::spawn(lock_if_still_gone(ctx.clone(), fp.clone(), st.name.clone()));
+            }
         }
     }
     info!(?peer, "disconnected");
@@ -419,6 +464,8 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(stream: S, peer: Peer, ctx: 
 struct SessionState {
     /// The phone's paired name (for notifications / indicator).
     name: String,
+    /// Gamepad mode: this phone's virtual controller.
+    gamepad: Option<crate::gamepad::Gamepad>,
     files: crate::files::Receiver,
     /// Messages produced outside the loop (file requests from FUSE threads).
     out_tx: tokio::sync::mpsc::UnboundedSender<WsMessage>,
@@ -606,6 +653,7 @@ async fn pc_info(ctx: &Ctx) -> Message {
         wol_macs: sysinfo::wol_macs(),
         power_actions: ctx.policy().allowed(),
         desktop: crate::deskflow::graphical_session().await.is_some(),
+        bluetooth: crate::bluetooth::address().await,
     }
 }
 
@@ -765,6 +813,36 @@ async fn dispatch(msg: Message, peer: &Peer, ctx: &Arc<Ctx>, st: &mut SessionSta
             }
             Ok(None)
         }
+        Message::Gamepad { buttons, lx, ly, rx, ry, lt, rt } => {
+            let Peer::Phone { .. } = peer else { bail!("gamepad mode is for phones") };
+            if st.gamepad.is_none() {
+                st.gamepad = Some(crate::gamepad::Gamepad::new(&st.name)?);
+                info!("{} is now a gamepad", st.name);
+            }
+            if let Some(pad) = &mut st.gamepad {
+                pad.update(crate::gamepad::State { buttons, lx, ly, rx, ry, lt, rt })?;
+            }
+            Ok(None)
+        }
+        Message::GamepadEnd => {
+            if st.gamepad.take().is_some() {
+                info!("{} is no longer a gamepad", st.name);
+            }
+            Ok(None)
+        }
+        Message::BtPairStart { name } => {
+            let Peer::Phone { .. } = peer else { bail!("only a paired phone can pair over Bluetooth") };
+            let out = st.out_tx.clone();
+            let ready_out = out.clone();
+            tokio::spawn(async move {
+                let res = crate::bluetooth::pair_window(name, move || {
+                    let _ = ready_out.send(frame(Message::BtPairReady));
+                })
+                .await;
+                let _ = out.send(frame(Message::BtPairResult { ok: res.is_ok(), message: res.err().map(|e| format!("{e:#}")) }));
+            });
+            Ok(None)
+        }
         Message::PointerAbs { x, y } => {
             if let Some(cast) = &st.cast {
                 cast.pointer(x, y).await?;
@@ -834,6 +912,14 @@ async fn dispatch(msg: Message, peer: &Peer, ctx: &Arc<Ctx>, st: &mut SessionSta
             layouts.set(&device, crate::deskflow::Placement { side, from, to });
             layouts.save(&identity::config_dir())?;
             ctx.deskflow.update_server(&sysinfo::hostname(), &layouts);
+            Ok(None)
+        }
+        // While this phone watches our screen, its pointer goes through the
+        // cast's remote-desktop session (same device as `PointerAbs`).
+        m @ (Message::PointerMove { .. } | Message::Scroll { .. } | Message::PointerButton { .. }) if st.cast.is_some() => {
+            if let Some(cast) = &st.cast {
+                cast.input(&m).await?;
+            }
             Ok(None)
         }
         Message::PointerMove { dx, dy } => with_input(&|i| i.pointer_move(dx, dy)),
@@ -1038,6 +1124,9 @@ async fn dispatch(msg: Message, peer: &Peer, ctx: &Arc<Ctx>, st: &mut SessionSta
         Message::Pair { .. } => Ok(None), // already paired; ignore
         Message::Pong
         | Message::PcInfo { .. }
+        | Message::BtPairReady
+        | Message::Ring
+        | Message::BtPairResult { .. }
         | Message::Error { .. }
         | Message::PairOk { .. }
         | Message::PairOffer { .. }

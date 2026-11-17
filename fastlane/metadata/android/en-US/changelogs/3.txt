@@ -1,0 +1,6 @@
+- Bluetooth: reaches the PC without Wi-Fi (set up once in Settings)
+- Gamepad mode: the phone becomes an Xbox controller, every button movable
+- Find my phone: the PC rings it, even on silent
+- Lock when I leave: the PC locks once the phone is gone
+- One pointer speed setting for the touchpad and the PC screen
+- PC screen: direct touch clicks where you tap; drags and scrolling fixed

@@ -8,10 +8,12 @@
 //! `pairing`). There is no plaintext network listener; the local CLI talks
 //! over an owner-only Unix socket.
 
+mod bluetooth;
 mod cast;
 mod deskflow;
 mod drive;
 mod files;
+mod gamepad;
 mod identity;
 mod input;
 mod keymap;

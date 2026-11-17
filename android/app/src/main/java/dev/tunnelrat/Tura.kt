@@ -59,6 +59,13 @@ class Tura(private val app: Application) {
         var wakeMac: String? = prefs.getString("wake_mac_${initial.fingerprint}", null)
         private val jobs = mutableListOf<kotlinx.coroutines.Job>()
 
+        /** The PC's Bluetooth address, from its last PcInfo: the fallback route. */
+        var btAddress: String? = prefs.getString("bt_${initial.fingerprint}", null)
+        /** Network attempts since the last success or Bluetooth try. */
+        var netTries = 0
+        private var lastBtTry = 0L
+        private var lastProbe = 0L
+
         val isConnected get() = client.state.value is TuraClient.State.Connected
 
         fun connect() {
@@ -67,9 +74,52 @@ class Tura(private val app: Application) {
             client.connect(p, p.hosts[Math.floorMod(hostIdx, p.hosts.size)], pendingToken)
         }
 
+        /** Bluetooth is possible for this PC right now. */
+        fun canBluetooth() = btAddress != null && pendingToken == null && dev.tunnelrat.net.BtBridge.usable(app)
+
+        /** Tries Bluetooth (at most every 20 s: each try pages the PC's radio). */
+        fun connectBluetooth() {
+            val addr = btAddress ?: return
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastBtTry < 20_000) return
+            lastBtTry = now
+            netTries = 0
+            val p = pc.value
+            scope.launch(Dispatchers.IO) { client.connectBluetooth(app, p, addr, null) }
+        }
+
+        /**
+         * On Bluetooth with a network back: if the PC answers there, switch
+         * (checked every 30 s with a plain TCP connect, which is cheap).
+         */
+        fun maybeLeaveBluetooth(force: Boolean = false) {
+            if (!client.viaBluetooth || client.state.value !is TuraClient.State.Connected || !net.value.canReachPc) return
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (!force && now - lastProbe < 30_000) return
+            lastProbe = now
+            val p = pc.value
+            scope.launch(Dispatchers.IO) {
+                val reachable = p.hosts.withIndex().firstOrNull { (_, h) ->
+                    runCatching { java.net.Socket().use { it.connect(java.net.InetSocketAddress(h, p.port), 1_500) } }.isSuccess
+                } ?: return@launch
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    if (client.viaBluetooth) {
+                        hostIdx = reachable.index
+                        connect()
+                    }
+                }
+            }
+        }
+
         fun start() {
             jobs += scope.launch {
                 client.pcInfo.collect { info ->
+                    info?.bluetooth?.let { bt ->
+                        if (bt != btAddress) {
+                            btAddress = bt
+                            prefs.edit().putString("bt_$fingerprint", bt).apply()
+                        }
+                    }
                     val mac = info?.wolMacs?.firstOrNull() ?: return@collect
                     wakeMac = mac
                     prefs.edit().putString("wake_mac_$fingerprint", mac).apply()
@@ -94,13 +144,23 @@ class Tura(private val app: Application) {
                 while (true) {
                     delay(backoff)
                     when (client.state.value) {
-                        is TuraClient.State.Connected, is TuraClient.State.Connecting -> backoff = 1_000L
+                        is TuraClient.State.Connected -> {
+                            backoff = 1_000L
+                            netTries = 0
+                            maybeLeaveBluetooth()
+                        }
+                        is TuraClient.State.Connecting -> backoff = 1_000L
                         is TuraClient.State.Failed, TuraClient.State.Disconnected -> {
-                            // No point dialling out with no route home; the network
-                            // callback reconnects as soon as Wi-Fi/VPN returns.
-                            if (net.value.canReachPc) {
-                                hostIdx++ // try the PC's next address (LAN, then Tailscale)
+                            // The network first (each of the PC's addresses: LAN, then
+                            // Tailscale); when that has no route home or keeps failing,
+                            // Bluetooth if the PC has it. Then the network again.
+                            val p = pc.value
+                            if (net.value.canReachPc && (netTries <= p.hosts.size || !canBluetooth())) {
+                                netTries++
+                                hostIdx++
                                 connect()
+                            } else if (canBluetooth()) {
+                                connectBluetooth()
                             }
                             backoff = (backoff * 2).coerceAtMost(10_000L)
                         }
@@ -270,6 +330,21 @@ class Tura(private val app: Application) {
     private var battery: Message.Battery? = null
     private val fileIds = AtomicInteger((System.currentTimeMillis() % 100_000).toInt())
 
+    /** Pointer speed for the touchpad and the cast view's trackpad mode: PC pixels per finger pixel. */
+    var pointerSpeed: Float
+        get() = prefs.getFloat("pointer_speed", DEFAULT_POINTER_SPEED)
+        set(v) = prefs.edit().putFloat("pointer_speed", v.coerceIn(MIN_POINTER_SPEED, MAX_POINTER_SPEED)).apply()
+
+    /** Gamepad mode: where the user put the buttons (JSON, see PadLayout). */
+    var padLayout: dev.tunnelrat.gamepad.PadLayout
+        get() = dev.tunnelrat.gamepad.PadLayout.fromJson(prefs.getString("pad_layout", null))
+        set(v) = prefs.edit().putString("pad_layout", v.toJson()).apply()
+
+    /** Gamepad mode: tilt the phone to steer the right stick. */
+    var padGyro: Boolean
+        get() = prefs.getBoolean("pad_gyro", false)
+        set(v) = prefs.edit().putBoolean("pad_gyro", v).apply()
+
     /** Cast view: trackpad mode (true) or direct touch; remembered. */
     var castTrackpad: Boolean
         get() = prefs.getBoolean("cast_trackpad", true)
@@ -370,6 +445,10 @@ class Tura(private val app: Application) {
             if (from === mirrorLink) stopMirror()
             return
         }
+        if (m is Message.Ring) {
+            Ringer.start(app, from.pc.value.name)
+            return
+        }
         if (m is Message.MirrorRequest) {
             main.post { mirrorRequested(from) }
             return
@@ -422,6 +501,79 @@ class Tura(private val app: Application) {
         watchNetwork()
     }
 
+    // ── Bluetooth pairing, for the fallback link ──
+
+    /** Settings shows this while a Bluetooth setup runs. */
+    private val _btSetupBusy = MutableStateFlow(false)
+    val btSetupBusy: StateFlow<Boolean> = _btSetupBusy.asStateFlow()
+    private var btPairing: PcLink? = null
+
+    private fun btAdapter() = app.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter
+
+    /** The selected PC's Bluetooth address, once it told us (it has Bluetooth). */
+    val selectedBtAddress: String? get() = selectedLink?.btAddress
+
+    /** The phone is Bluetooth-paired with the selected PC. */
+    @android.annotation.SuppressLint("MissingPermission")
+    fun selectedBtPaired(): Boolean {
+        val addr = selectedBtAddress ?: return false
+        if (!dev.tunnelrat.net.BtBridge.permitted(app)) return false
+        return runCatching { btAdapter()?.bondedDevices?.any { it.address.equals(addr, ignoreCase = true) } == true }.getOrDefault(false)
+    }
+
+    /**
+     * Pairs the phone with the selected PC over Bluetooth: asks the PC (over
+     * the network link, which proves it's us) to accept this phone for a
+     * minute, then bonds. Android shows its own "Pair?" prompt.
+     */
+    /** Shown under the setup button: why it can't start, or how it ended. */
+    private val _btSetupNote = MutableStateFlow<String?>(null)
+    val btSetupNote: StateFlow<String?> = _btSetupNote.asStateFlow()
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun setUpBluetooth() {
+        val link = selectedLink ?: return
+        val name = link.pc.value.name
+        val adapter = btAdapter()
+        val problem = when {
+            !dev.tunnelrat.net.BtBridge.permitted(app) -> "Allow “Nearby devices” for Tunnelrat first"
+            adapter == null -> "This phone has no Bluetooth"
+            !adapter.isEnabled -> "Turn on Bluetooth first"
+            !link.isConnected || link.client.viaBluetooth -> "Connect to $name over Wi-Fi first"
+            link.btAddress == null -> "$name has no Bluetooth, or it's switched off"
+            selectedBtPaired() -> "Already paired with $name"
+            else -> null
+        }
+        android.util.Log.i("TuraBt", "set up Bluetooth with $name: ${problem ?: "asking the PC"}")
+        _btSetupNote.value = problem
+        if (problem != null) return
+        btPairing = link
+        _btSetupBusy.value = true
+        if (!link.client.send(Message.BtPairStart(adapter!!.name ?: android.os.Build.MODEL))) {
+            btPairing = null
+            _btSetupBusy.value = false
+            _btSetupNote.value = "Lost the connection to $name; try again"
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun onBtPair(link: PcLink, result: Message.BtPairResult?) {
+        if (btPairing !== link) return
+        val name = link.pc.value.name
+        if (result == null) {
+            // The PC is listening: bond (Android asks the user to confirm).
+            val ok = runCatching { btAdapter()?.getRemoteDevice(link.btAddress!!.uppercase())?.createBond() == true }.getOrDefault(false)
+            android.util.Log.i("TuraBt", "$name is ready; createBond=$ok")
+            if (!ok) _btSetupNote.value = "Couldn't start Bluetooth pairing with $name"
+            return
+        }
+        btPairing = null
+        _btSetupBusy.value = false
+        android.util.Log.i("TuraBt", "pairing with $name: ok=${result.ok} ${result.message ?: ""}")
+        _btSetupNote.value = if (result.ok) null else "Pairing failed: ${result.message ?: "unknown reason"}".ellipsize(160)
+        if (result.ok) _toast.value = "Bluetooth ready: $name stays reachable without Wi-Fi"
+    }
+
     private fun onEvent(link: PcLink, ev: TuraClient.Event) {
         val name = link.pc.value.name
         when (ev) {
@@ -438,6 +590,7 @@ class Tura(private val app: Application) {
             is TuraClient.Event.ServerError -> _toast.value = (if (_links.value.size > 1) "$name: ${ev.message}" else ev.message).ellipsize(160)
             is TuraClient.Event.Clipboard -> if (clipboardPeer(link)) onPcClipboard(ev.text)
             is TuraClient.Event.FileSaved -> fileSaved(ev.path)
+            is TuraClient.Event.BtPair -> onBtPair(link, ev.result)
             is TuraClient.Event.LoginResult -> {
                 _loggingIn.value = false
                 _toast.value = if (ev.ok) ev.message ?: "Logged in" else ev.message ?: "Login failed"
@@ -495,6 +648,7 @@ class Tura(private val app: Application) {
         main.post { updateDiscovery() }
         // A new route home: reconnect now (LAN address first) instead of waiting out the backoff.
         if (new != old && new.canReachPc) {
+            for (l in _links.value) l.maybeLeaveBluetooth(force = true)
             for (l in _links.value) if (!l.isConnected) {
                 l.hostIdx = 0
                 l.connect()
@@ -823,3 +977,7 @@ private fun java.io.InputStream.readNBytesCompat(buf: ByteArray): Int {
 
 /** Keeps snackbars readable even if the PC sends a long error. */
 internal fun String.ellipsize(max: Int) = if (length <= max) this else take(max - 1).trimEnd() + "…"
+
+const val DEFAULT_POINTER_SPEED = 1.4f
+const val MIN_POINTER_SPEED = 0.4f
+const val MAX_POINTER_SPEED = 3.5f

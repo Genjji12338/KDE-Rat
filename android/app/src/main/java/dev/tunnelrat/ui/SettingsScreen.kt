@@ -28,18 +28,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlin.math.roundToInt
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -136,6 +140,54 @@ fun SettingsScreen(tura: TuraCore, onUnpair: () -> Unit, onClose: () -> Unit) {
                     }
                     ctx.startActivity(intent)
                 }
+            }
+        }
+
+        Section {
+            var speed by remember { mutableStateOf(tura.pointerSpeed) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Pointer speed", color = Tura.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Text("%.1f×".format(speed), color = Tura.Muted, fontSize = 13.sp)
+            }
+            Text("Touchpad and the PC screen's trackpad mode", color = Tura.Muted, fontSize = 12.sp)
+            Slider(
+                value = speed,
+                onValueChange = { speed = (it * 10).roundToInt() / 10f },
+                onValueChangeFinished = { tura.pointerSpeed = speed },
+                valueRange = dev.tunnelrat.MIN_POINTER_SPEED..dev.tunnelrat.MAX_POINTER_SPEED,
+                colors = SliderDefaults.colors(thumbColor = Tura.Amber, activeTrackColor = Tura.Amber, inactiveTrackColor = Tura.Line),
+            )
+            if (speed != dev.tunnelrat.DEFAULT_POINTER_SPEED) {
+                Text(
+                    "Reset to ${dev.tunnelrat.DEFAULT_POINTER_SPEED}×",
+                    color = Tura.Amber, fontSize = 13.sp,
+                    modifier = Modifier.clickable { speed = dev.tunnelrat.DEFAULT_POINTER_SPEED; tura.pointerSpeed = speed },
+                )
+            }
+        }
+
+        if (pc != null) Section {
+            val busy by tura.btSetupBusy.collectAsState()
+            var paired by remember { mutableStateOf(tura.selectedBtPaired()) }
+            LaunchedEffect(busy) { paired = tura.selectedBtPaired() }
+            val addr = tura.selectedBtAddress
+            Text("Bluetooth", color = Tura.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text(
+                when {
+                    addr == null -> "${pc!!.name} hasn't reported Bluetooth (none, or switched off)."
+                    paired -> "Paired: without Wi-Fi, Tunnelrat reaches ${pc!!.name} over Bluetooth (everything but its screen). Keep Bluetooth on."
+                    else -> "Pair once so Tunnelrat reaches ${pc!!.name} over Bluetooth when there's no Wi-Fi."
+                },
+                color = Tura.Muted, fontSize = 12.sp,
+            )
+            if (addr != null && !paired) {
+                Text(
+                    if (busy) "Pairing… confirm on the phone" else "Set up Bluetooth",
+                    color = if (busy) Tura.Muted else Tura.Amber, fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                    modifier = Modifier.clickable(enabled = !busy) { tura.setUpBluetooth() }.padding(vertical = 6.dp),
+                )
+                val note by tura.btSetupNote.collectAsState()
+                note?.let { Text(it, color = Tura.Danger, fontSize = 12.sp) }
             }
         }
 

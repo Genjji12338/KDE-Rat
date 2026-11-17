@@ -22,6 +22,11 @@ import java.util.concurrent.TimeUnit
  * the PC trusts us by our Keystore client certificate (see [PhoneIdentity]).
  */
 class TuraClient {
+    companion object {
+        /** [State] host while the link runs over Bluetooth. */
+        const val BLUETOOTH = "Bluetooth"
+    }
+
     sealed interface State {
         data object Disconnected : State
         data class Connecting(val host: String) : State
@@ -38,6 +43,8 @@ class TuraClient {
         data class Clipboard(val text: String) : Event
         data class FileSaved(val id: Int, val path: String) : Event
         data class LoginResult(val ok: Boolean, val message: String?) : Event
+        /** Bluetooth pairing: the PC is ready ([result] null), or it ended. */
+        data class BtPair(val result: Message.BtPairResult?) : Event
     }
 
     private var socket: WebSocket? = null
@@ -74,9 +81,53 @@ class TuraClient {
             .also { http = it; httpPin = pin }
     }
 
-    /** @param pairToken one-time token from the QR code, only for the first connection. */
-    fun connect(pc: PairedPc, host: String, pairToken: String?) {
+    /** Bluetooth bridge under the current connection, if it goes over Bluetooth. */
+    @Volatile private var bridge: BtBridge? = null
+
+    /** Connected (or connecting) over Bluetooth rather than the network. */
+    val viaBluetooth: Boolean get() = when (val s = state.value) {
+        is State.Connected -> s.host == BLUETOOTH
+        is State.Connecting -> s.host == BLUETOOTH
+        else -> false
+    }
+
+    /**
+     * Over Bluetooth to the PC's adapter at [address] (fallback when the
+     * network can't reach it). Blocks while Bluetooth connects; call off the main thread.
+     */
+    fun connectBluetooth(ctx: android.content.Context, pc: PairedPc, address: String, pairToken: String?) {
         socket?.cancel()
+        closeBridge()
+        _state.value = State.Connecting(BLUETOOTH)
+        val b = try {
+            BtBridge.open(ctx, address)
+        } catch (e: Exception) {
+            android.util.Log.w("TuraBt", "Bluetooth connect failed: $e")
+            if (state.value == State.Connecting(BLUETOOTH)) _state.value = State.Failed(BLUETOOTH, e.message ?: e.javaClass.simpleName)
+            return
+        }
+        // Superseded (Wi-Fi came back, or disconnect) while Bluetooth was connecting.
+        if (state.value != State.Connecting(BLUETOOTH)) {
+            android.util.Log.i("TuraBt", "Bluetooth connected but no longer wanted (${state.value})")
+            return b.close()
+        }
+        android.util.Log.i("TuraBt", "Bluetooth connected; starting the session on 127.0.0.1:${b.port}")
+        bridge = b
+        connect(pc, BLUETOOTH, pairToken, dial = "127.0.0.1", port = b.port)
+    }
+
+    private fun closeBridge() {
+        bridge?.close()
+        bridge = null
+    }
+
+    /**
+     * @param pairToken one-time token from the QR code, only for the first connection.
+     * @param host what to show/report; [dial] and [port] where to actually connect.
+     */
+    fun connect(pc: PairedPc, host: String, pairToken: String?, dial: String = host, port: Int = pc.port) {
+        socket?.cancel()
+        if (host != BLUETOOTH) closeBridge()
         _state.value = State.Connecting(host)
         val client = try {
             httpFor(pc.fingerprint)
@@ -86,7 +137,7 @@ class TuraClient {
         }
         var awaitingPair = pairToken != null
         var sawHello = false
-        val req = Request.Builder().url("wss://$host:${pc.port}/").build()
+        val req = Request.Builder().url("wss://$dial:$port/").build()
         socket = client.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (pairToken != null) webSocket.send(Message.Pair(pairToken, Build.MODEL).toJson())
@@ -109,7 +160,9 @@ class TuraClient {
                     is Message.FileSaved -> _events.tryEmit(Event.FileSaved(m.id, m.path))
                     is Message.CastStarted, is Message.CastEnded -> _cast.tryEmit(m)
                     is Message.LoginResult -> _events.tryEmit(Event.LoginResult(m.ok, m.message))
-                    is Message.MirrorStop, is Message.MirrorRequest, is Message.PhoneReply, is Message.PhoneGesture, is Message.PhoneTouch, is Message.PhoneNav, is Message.PhoneText -> onControl?.invoke(m)
+                    is Message.BtPairReady -> _events.tryEmit(Event.BtPair(null))
+                    is Message.BtPairResult -> _events.tryEmit(Event.BtPair(m))
+                    is Message.MirrorStop, is Message.MirrorRequest, is Message.Ring, is Message.PhoneReply, is Message.PhoneGesture, is Message.PhoneTouch, is Message.PhoneNav, is Message.PhoneText -> onControl?.invoke(m)
                     is Message.PcInfo -> {
                         _pcInfo.value = m
                         _state.value = State.Connected(m.hostname, host)
@@ -126,11 +179,18 @@ class TuraClient {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                if (socket === webSocket) _state.value = State.Disconnected
+                if (socket === webSocket) {
+                    closeBridge()
+                    _state.value = State.Disconnected
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (socket === webSocket) _state.value = State.Failed(host, t.message ?: t.javaClass.simpleName)
+                if (host == BLUETOOTH) android.util.Log.w("TuraBt", "link over Bluetooth failed (current=${socket === webSocket})", t)
+                if (socket === webSocket) {
+                    closeBridge()
+                    _state.value = State.Failed(host, t.message ?: t.javaClass.simpleName)
+                }
             }
         })
     }
@@ -138,6 +198,7 @@ class TuraClient {
     fun disconnect() {
         socket?.close(1000, null)
         socket = null
+        closeBridge()
         _state.value = State.Disconnected
     }
 

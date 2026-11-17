@@ -23,7 +23,11 @@ class TuraViewModel(app: Application) : AndroidViewModel(app) {
     fun declineOffer() = tura.declineOffer()
     fun unpair() = tura.unpair()
 
-    fun move(dx: Float, dy: Float) = client.send(Message.PointerMove(dx, dy))
+    /** Finger movement in pixels; scaled by the pointer speed setting. */
+    fun move(dx: Float, dy: Float): Boolean {
+        val k = tura.pointerSpeed
+        return client.send(Message.PointerMove(dx * k, dy * k))
+    }
     fun scroll(dx: Float, dy: Float) = client.send(Message.Scroll(dx, dy))
     fun click(b: MouseButton) = client.send(Message.PointerButton(b, PressState.Click))
 
@@ -46,6 +50,12 @@ class TuraViewModel(app: Application) : AndroidViewModel(app) {
     val casting = kotlinx.coroutines.flow.MutableStateFlow(false)
     fun pointerAt(x: Float, y: Float) = client.send(Message.PointerAbs(x, y))
     fun button(b: MouseButton, s: PressState) = client.send(Message.PointerButton(b, s))
+
+    /** Gamepad mode is open (volume keys become LB / RB). */
+    val gaming = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val pad = dev.tunnelrat.gamepad.PadState()
+    fun sendPad(): Boolean = with(pad) { client.send(Message.Gamepad(buttons, lx, ly, rx, ry, lt, rt)) }
+    fun endPad() = client.send(Message.GamepadEnd)
 
     /** Presentation mode: volume keys become next/previous slide. */
     val presenting = kotlinx.coroutines.flow.MutableStateFlow(false)

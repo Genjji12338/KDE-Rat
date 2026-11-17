@@ -262,7 +262,12 @@ async fn link(ctx: &Arc<Ctx>, cfg: &PeerConfig, host: &str) -> Result<()> {
                         }
                     }
                     Message::PointerAbs { x, y } => if let Some(c) = &cast { let _ = c.pointer(x, y).await; },
-                    m @ (Message::PointerButton { .. } | Message::Scroll { .. } | Message::Key { .. }) => {
+                    m @ (Message::PointerButton { .. } | Message::Scroll { .. } | Message::PointerMove { .. }) if cast.is_some() => {
+                        if let Some(c) = &cast && let Err(e) = c.input(&m).await {
+                            warn!("input from {}: {e:#}", cfg.name);
+                        }
+                    }
+                    m @ Message::Key { .. } => {
                         if cast.is_some() && let Err(e) = ctx.inject(&m) {
                             warn!("input from {}: {e:#}", cfg.name);
                         }

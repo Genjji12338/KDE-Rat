@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Bluetooth fallback when the network can't reach the PC. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Background connection (clipboard, notifications, battery). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -128,6 +131,7 @@
             android:taskAffinity=""
             android:theme="@style/Theme.Tunnelrat.Invisible" />
 
+        <receiver android:name=".Ringer$StopReceiver" android:exported="false" />
         <receiver android:name=".TuraWidget" android:exported="true" android:label="Tunnelrat">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

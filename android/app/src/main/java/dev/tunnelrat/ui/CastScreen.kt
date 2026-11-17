@@ -68,7 +68,7 @@ import dev.tunnelrat.proto.PressState
 
 private const val SCROLL_PX_PER_NOTCH = 40f
 
-private tailrec fun Context.activity(): Activity? = when (this) {
+internal tailrec fun Context.activity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.activity()
     else -> null
@@ -110,7 +110,10 @@ fun CastScreen(vm: TuraViewModel, pcName: String, onClose: () -> Unit) {
 
     // (Re)start the cast whenever we're connected.
     LaunchedEffect(connected) {
-        if (connected) {
+        if (connected && vm.client.viaBluetooth) {
+            video = null
+            status = "Connected to $pcName over Bluetooth, which is too slow for its screen.\nThe touchpad and everything else work; the screen needs Wi-Fi."
+        } else if (connected) {
             val dm = context.resources.displayMetrics
             val long = maxOf(dm.widthPixels, dm.heightPixels)
             val short = minOf(dm.widthPixels, dm.heightPixels)
@@ -220,16 +223,15 @@ private fun RoundButton(icon: ImageVector, label: String, active: Boolean, onCli
     }
 }
 
-private const val POINTER_GAIN = 0.8f
 private const val TAP_MAX_MS = 250L
 
 /**
  * Touches on the video → the PC's pointer.
  *
  * Trackpad mode: drag moves the pointer from where it is, tap clicks at the
- * pointer. Direct mode: the pointer jumps to the finger, tap clicks there.
- * Both: long-press = right click, long-press then drag = left-button drag,
- * two fingers = scroll.
+ * pointer, long-press then drag = left-button drag. Direct mode: like a
+ * touchscreen: tap clicks under the finger, drag drags from there.
+ * Both: long-press = right click, two fingers = scroll.
  */
 @Composable
 private fun TouchLayer(vm: TuraViewModel, trackpad: Boolean, modifier: Modifier) {
@@ -293,7 +295,9 @@ private fun TouchLayer(vm: TuraViewModel, trackpad: Boolean, modifier: Modifier)
                     if (!moved && (p - start).getDistance() > slop) {
                         moved = true
                         last = start
-                        if (longPressed) {
+                        // Trackpad: long-press then drag holds the button.
+                        // Direct touch: any drag does, like a touchscreen.
+                        if (longPressed || !trackpad) {
                             dragging = true
                             vm.button(MouseButton.Left, PressState.Down)
                         }
@@ -301,7 +305,7 @@ private fun TouchLayer(vm: TuraViewModel, trackpad: Boolean, modifier: Modifier)
                     if (moved) {
                         if (trackpad) {
                             val d = p - last
-                            vm.move(d.x * POINTER_GAIN, d.y * POINTER_GAIN)
+                            vm.move(d.x, d.y)
                         } else {
                             at(p)
                         }

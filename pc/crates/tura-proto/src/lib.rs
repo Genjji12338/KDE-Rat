@@ -42,6 +42,10 @@ pub enum Message {
         /// the phone then offers to log in. Re-sent when it changes.
         #[serde(default = "yes")]
         desktop: bool,
+        /// Bluetooth adapter address ("AA:BB:..."), when the PC also accepts
+        /// connections over Bluetooth (fallback without a network).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bluetooth: Option<String>,
     },
     /// Phone → PC at the login screen: type this password to log in.
     Login { password: String },
@@ -199,6 +203,18 @@ pub enum Message {
     CastStarted { width: u32, height: u32 },
     /// Viewer → PC: stop streaming.
     CastStop,
+    /// Phone → PC (over the network link): let this phone pair over Bluetooth
+    /// for a minute, so the Bluetooth fallback works. `name` is the phone's
+    /// Bluetooth name; only a device with that name is accepted.
+    BtPairStart { name: String },
+    /// PC → phone: the PC is now visible and accepts the phone; bond now.
+    BtPairReady,
+    /// PC → phone: how Bluetooth pairing ended.
+    BtPairResult {
+        ok: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
     /// PC → viewer: the stream ended (`reason` if it wasn't asked to).
     CastEnded {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -216,6 +232,14 @@ pub enum Message {
     MirrorStop,
     /// PC → phone: please start mirroring (sent with `ForDevice` from `tura mirror`).
     MirrorRequest,
+    /// Phone → PC: gamepad mode, the whole controller state (sent on every
+    /// change). Buttons are [`pad`] bits; sticks −1…1 (y down), triggers 0…1.
+    Gamepad { buttons: u32, lx: f32, ly: f32, rx: f32, ry: f32, lt: f32, rt: f32 },
+    /// Phone → PC: gamepad mode closed; unplug the virtual controller.
+    GamepadEnd,
+    /// PC → phone: ring loudly so it can be found (even on silent), until
+    /// stopped on the phone or after a while.
+    Ring,
     /// PC → phone: perform a touch gesture. `path` points are
     /// `[x, y, t]`: x/y 0.0–1.0 of the screen, t milliseconds from the start.
     PhoneGesture { path: Vec<[f32; 3]> },
@@ -386,6 +410,25 @@ pub enum FsResult {
     Error { error: FsError },
 }
 
+/// Gamepad button bits (`Message::Gamepad::buttons`).
+pub mod pad {
+    pub const A: u32 = 1 << 0;
+    pub const B: u32 = 1 << 1;
+    pub const X: u32 = 1 << 2;
+    pub const Y: u32 = 1 << 3;
+    pub const LB: u32 = 1 << 4;
+    pub const RB: u32 = 1 << 5;
+    pub const VIEW: u32 = 1 << 6;
+    pub const MENU: u32 = 1 << 7;
+    pub const HOME: u32 = 1 << 8;
+    pub const L3: u32 = 1 << 9;
+    pub const R3: u32 = 1 << 10;
+    pub const UP: u32 = 1 << 11;
+    pub const DOWN: u32 = 1 << 12;
+    pub const LEFT: u32 = 1 << 13;
+    pub const RIGHT: u32 = 1 << 14;
+}
+
 /// Largest read/write chunk per request (raw bytes).
 pub const FS_CHUNK: u32 = 1024 * 1024;
 
@@ -401,11 +444,14 @@ pub struct TuradSettings {
     pub shared_input: bool,
     /// Device fingerprints whose chip is hidden from the top bar.
     pub hidden_chips: Vec<String>,
+    /// Phones (fingerprints): lock this PC when that phone has been gone for
+    /// a short while (out of Wi-Fi and Bluetooth range, or switched off).
+    pub lock_when_gone: Vec<String>,
 }
 
 impl Default for TuradSettings {
     fn default() -> Self {
-        Self { clipboard: true, allow_suspend: false, shared_input: true, hidden_chips: vec![] }
+        Self { clipboard: true, allow_suspend: false, shared_input: true, hidden_chips: vec![], lock_when_gone: vec![] }
     }
 }
 

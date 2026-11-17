@@ -243,6 +243,14 @@ class DevicesPage(Adw.Bin):
             )
         row.add_suffix(screen)
 
+        if not is_pc:
+            ring = Gtk.Button(icon_name="audio-volume-high-symbolic", tooltip_text="Ring it, to find it", valign=Gtk.Align.CENTER, css_classes=["flat"], sensitive=online)
+            ring.connect(
+                "clicked",
+                lambda _b: self.win.run({"type": "for_device", "device": name, "message": {"type": "ring"}}, f"{name} is ringing; stop it on the phone"),
+            )
+            row.add_suffix(ring)
+
         if d.get("drive"):
             drive = Gtk.Button(icon_name="folder-symbolic", tooltip_text="Open its files", valign=Gtk.Align.CENTER, css_classes=["flat"])
             path = d["drive"]
@@ -557,6 +565,13 @@ class SettingsPage(Adw.Bin):
             r.connect("notify::active", lambda *_: self.save())
         self.page.add(g)
 
+        self.leave = Adw.PreferencesGroup(
+            title="Lock when I leave",
+            description="Lock this PC when the phone has been gone for half a minute: out of Wi-Fi and Bluetooth range, or switched off.",
+        )
+        self.page.add(self.leave)
+        self.leave_rows = []
+
         self.chips = Adw.PreferencesGroup(title="Top bar", description="Which devices show as a chip (with battery) in the top bar.")
         self.page.add(self.chips)
         self.chip_rows = []
@@ -590,6 +605,22 @@ class SettingsPage(Adw.Bin):
             row = Adw.ActionRow(title="No paired devices")
             self.chips.add(row)
             self.chip_rows.append(row)
+        for r in self.leave_rows:
+            self.leave.remove(r)
+        self.leave_rows = []
+        gone = set(s.get("lock_when_gone", []))
+        for d in self.devices:
+            if d.get("kind") == "pc":
+                continue
+            row = Adw.SwitchRow(title=GLib.markup_escape_text(d["name"]), active=d["fingerprint"] in gone)
+            row.fingerprint = d["fingerprint"]
+            row.connect("notify::active", lambda *_: self.save())
+            self.leave.add(row)
+            self.leave_rows.append(row)
+        if not self.leave_rows:
+            row = Adw.ActionRow(title="No paired phones")
+            self.leave.add(row)
+            self.leave_rows.append(row)
         self.loading = False
         return False
 
@@ -601,6 +632,7 @@ class SettingsPage(Adw.Bin):
         s["shared_input"] = self.mouse.get_active()
         s["allow_suspend"] = self.suspend.get_active()
         s["hidden_chips"] = [r.fingerprint for r in self.chip_rows if hasattr(r, "fingerprint") and not r.get_active()]
+        s["lock_when_gone"] = [r.fingerprint for r in self.leave_rows if hasattr(r, "fingerprint") and r.get_active()]
         self.settings = s
         call({"type": "set_settings", "settings": s}, None, self.win.error)
 

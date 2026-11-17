@@ -42,7 +42,7 @@ data class NowPlaying(
 sealed interface Message {
     data class Hello(val deviceName: String, val deviceKind: String = "phone", val protocol: Int = PROTOCOL_VERSION) : Message
     /** [desktop] false = the PC is at its login screen. */
-    data class PcInfo(val hostname: String, val wolMacs: List<String>, val powerActions: Set<PowerAction>, val desktop: Boolean = true) : Message
+    data class PcInfo(val hostname: String, val wolMacs: List<String>, val powerActions: Set<PowerAction>, val desktop: Boolean = true, val bluetooth: String? = null) : Message
     /** Phone → PC at the login screen. */
     data class Login(val password: String) : Message
     data class LoginResult(val ok: Boolean, val message: String?) : Message
@@ -77,6 +77,11 @@ sealed interface Message {
     /** Phone → PC: stream your screen, scaled to fit. */
     data class CastStart(val maxWidth: Int, val maxHeight: Int) : Message
     data object CastStop : Message
+    /** Phone → PC: open Bluetooth pairing for this phone (its Bluetooth [name]). */
+    data class BtPairStart(val name: String) : Message
+    /** PC → phone: bond now. */
+    data object BtPairReady : Message
+    data class BtPairResult(val ok: Boolean, val message: String?) : Message
     /** PC → phone: H.264 frames of this size follow (binary, kind 4). */
     data class CastStarted(val width: Int, val height: Int) : Message
     data class CastEnded(val reason: String?) : Message
@@ -87,6 +92,11 @@ sealed interface Message {
     data object MirrorStop : Message
     /** PC → phone: please start mirroring. */
     data object MirrorRequest : Message
+    /** PC → phone: ring so it can be found. */
+    data object Ring : Message
+    /** Phone → PC: gamepad mode state (see [dev.tunnelrat.gamepad.Pad] bits). */
+    data class Gamepad(val buttons: Int, val lx: Float, val ly: Float, val rx: Float, val ry: Float, val lt: Float, val rt: Float) : Message
+    data object GamepadEnd : Message
     /** PC → phone: touch gesture; each point is (x, y, t ms), x/y 0–1. */
     data class PhoneGesture(val path: List<FloatArray>) : Message
     /** PC → phone: live touch, [action] = "down" / "move" / "up", x/y 0–1. */
@@ -135,12 +145,22 @@ sealed interface Message {
             is FileSaved -> { put("type", "file_saved"); put("id", m.id); put("path", m.path) }
             is CastStart -> { put("type", "cast_start"); put("max_width", m.maxWidth); put("max_height", m.maxHeight) }
             CastStop -> put("type", "cast_stop")
+            is BtPairStart -> { put("type", "bt_pair_start"); put("name", m.name) }
+            BtPairReady -> put("type", "bt_pair_ready")
+            is BtPairResult -> { put("type", "bt_pair_result"); put("ok", m.ok) }
             is PointerAbs -> { put("type", "pointer_abs"); put("x", m.x.toDouble()); put("y", m.y.toDouble()) }
             is MirrorStart -> { put("type", "mirror_start"); put("width", m.width); put("height", m.height) }
             MirrorStop -> put("type", "mirror_stop")
             is Login -> { put("type", "login"); put("password", m.password) }
             is LoginResult -> put("type", "login_result")
             MirrorRequest -> put("type", "mirror_request")
+            Ring -> put("type", "ring")
+            is Gamepad -> {
+                put("type", "gamepad"); put("buttons", m.buttons)
+                put("lx", m.lx.toDouble()); put("ly", m.ly.toDouble()); put("rx", m.rx.toDouble()); put("ry", m.ry.toDouble())
+                put("lt", m.lt.toDouble()); put("rt", m.rt.toDouble())
+            }
+            GamepadEnd -> put("type", "gamepad_end")
             is PhoneGesture, is PhoneTouch, is PhoneNav, is PhoneText -> put("type", "unsupported") // PC → phone only
             is CastStarted -> put("type", "cast_started") // phone never sends these
             is CastEnded -> put("type", "cast_ended")
@@ -169,6 +189,7 @@ sealed interface Message {
                         powerActions = List(power?.length() ?: 0) { power!!.getString(it) }
                             .mapNotNull(PowerAction::fromWire).toSet(),
                         desktop = o.optBoolean("desktop", true),
+                        bluetooth = o.optString("bluetooth").takeIf { it.matches(Regex("([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}")) },
                     )
                 }
                 "pair_ok" -> PairOk(o.optString("pc_name"))
@@ -178,6 +199,7 @@ sealed interface Message {
                 "phone_reply" -> PhoneReply(o.optString("key"), o.optString("text"))
                 "login_result" -> LoginResult(o.optBoolean("ok"), o.optString("message").takeUnless { o.isNull("message") || it.isEmpty() })
                 "mirror_request" -> MirrorRequest
+                "ring" -> Ring
                 "phone_gesture" -> {
                     val a = o.getJSONArray("path")
                     PhoneGesture(List(a.length()) { i -> a.getJSONArray(i).let { p -> FloatArray(3) { p.getDouble(it).toFloat() } } })
@@ -186,6 +208,8 @@ sealed interface Message {
                 "phone_nav" -> PhoneNav(o.optString("action"))
                 "phone_text" -> PhoneText(o.optString("text"))
                 "cast_started" -> CastStarted(o.optInt("width"), o.optInt("height"))
+                "bt_pair_ready" -> BtPairReady
+                "bt_pair_result" -> BtPairResult(o.optBoolean("ok"), o.optString("message").takeUnless { o.isNull("message") || it.isEmpty() })
                 "cast_ended" -> CastEnded(o.optString("reason").takeUnless { o.isNull("reason") || it.isEmpty() })
                 "file_saved" -> FileSaved(o.optInt("id"), o.optString("path"))
                 "now_playing" -> NowPlayingMsg(

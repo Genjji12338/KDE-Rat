@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.sp
 
 private const val TAP_SLOP_PX = 18f
 private const val TAP_MAX_MS = 220L
-private const val POINTER_GAIN = 1.6f
 private const val SCROLL_PX_PER_NOTCH = 40f
 /** Three fingers: a swipe fires after this much travel (once per gesture). */
 private const val SWIPE_PX = 90f
@@ -88,7 +87,7 @@ fun Touchpad(
                             if (pressed.size >= 2) {
                                 onScroll(-delta.x / SCROLL_PX_PER_NOTCH, -delta.y / SCROLL_PX_PER_NOTCH)
                             } else if (maxFingers == 1) {
-                                onMove(delta.x * POINTER_GAIN, delta.y * POINTER_GAIN)
+                                onMove(delta.x, delta.y)
                             }
                         }
                         event.changes.forEach { it.consume() }

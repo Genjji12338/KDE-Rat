@@ -143,6 +143,7 @@ class DevicesIndicator {
                 this.button.menu.addAction('Lock it', () => tura('power', 'lock', '--device', d.name));
             } else {
                 this.button.menu.addAction('Show its screen on this PC', () => tura('mirror', d.name));
+                this.button.menu.addAction('Ring it', () => tura('ring', d.name));
             }
             this.button.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         }

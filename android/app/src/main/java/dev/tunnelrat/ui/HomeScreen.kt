@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Slideshow
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material3.AlertDialog
@@ -98,7 +99,7 @@ fun HomeScreen(vm: TuraViewModel, onMirror: () -> Unit = {}) {
             val links by vm.tura.links.collectAsState()
             Header(
                 state, net, paired = pc != null, pcName = pc?.name, links = links, selected = pc?.fingerprint,
-                onSelect = vm.tura::select, onPairAnother = { scanning = true }, onUnpair = vm::unpair, onSettings = { settings = true }, onPresent = { vm.presenting.value = true }, onCast = { vm.casting.value = true },
+                onSelect = vm.tura::select, onPairAnother = { scanning = true }, onUnpair = vm::unpair, onSettings = { settings = true }, onPresent = { vm.presenting.value = true }, onGamepad = { vm.gaming.value = true }, onCast = { vm.casting.value = true },
                 mirroring = vm.tura.mirroring.collectAsState().value, onMirror = { if (vm.tura.mirroring.value) vm.tura.stopMirror() else onMirror() })
 
             if (pc == null) {
@@ -107,12 +108,26 @@ fun HomeScreen(vm: TuraViewModel, onMirror: () -> Unit = {}) {
             }
 
             if (state !is TuraClient.State.Connected) {
+                // Without a route home, Bluetooth may still reach the PC.
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                val name = pc!!.name
+                val bluetooth = when {
+                    vm.tura.selectedBtAddress == null -> null
+                    !vm.tura.selectedBtPaired() -> "Within Bluetooth range it can work without Wi-Fi too: set up Bluetooth in Settings once while on Wi-Fi."
+                    !dev.tunnelrat.net.BtBridge.usable(ctx) -> "Or turn on Bluetooth to reach $name when it's nearby."
+                    (state as? TuraClient.State.Connecting)?.host == TuraClient.BLUETOOTH -> "Connecting to $name over Bluetooth…"
+                    else -> "Trying Bluetooth too: this works when $name is nearby (its screen needs Wi-Fi)."
+                }
                 when (net) {
                     TuraCore.Net.MobileOnly -> NetBanner(
                         "Your phone isn't on Wi-Fi",
-                        "Turn on Wi-Fi to reach ${pc!!.name} at home. Away from home, connect Tailscale on the phone and Tunnelrat uses the PC's Tailscale address.",
+                        "Turn on Wi-Fi to reach $name at home. Away from home, connect Tailscale on the phone and Tunnelrat uses the PC's Tailscale address." +
+                            (bluetooth?.let { "\n\n$it" } ?: ""),
                     )
-                    TuraCore.Net.None -> NetBanner("No network", "Your phone is offline. Tunnelrat reconnects as soon as it's back.")
+                    TuraCore.Net.None -> NetBanner(
+                        "No network",
+                        "Your phone is offline. Tunnelrat reconnects as soon as it's back." + (bluetooth?.let { "\n\n$it" } ?: ""),
+                    )
                     else -> (state as? TuraClient.State.Failed)?.let { f ->
                         Text("Can't reach ${pc!!.name} at ${f.host} — ${f.reason}", color = Tura.Muted, fontSize = 12.sp)
                     }
@@ -174,6 +189,11 @@ fun HomeScreen(vm: TuraViewModel, onMirror: () -> Unit = {}) {
             )
         }
 
+        val gaming by vm.gaming.collectAsState()
+        if (gaming) {
+            GamepadScreen(vm, pcName = pc?.name ?: "the PC", onClose = { vm.gaming.value = false })
+        }
+
         val casting by vm.casting.collectAsState()
         if (casting) {
             CastScreen(vm, pcName = pc?.name ?: "the PC", onClose = { vm.casting.value = false })
@@ -212,7 +232,7 @@ fun HomeScreen(vm: TuraViewModel, onMirror: () -> Unit = {}) {
 }
 
 @Composable
-private fun Header(state: TuraClient.State, net: TuraCore.Net, paired: Boolean, pcName: String?, links: List<TuraCore.PcLink>, selected: String?, onSelect: (String) -> Unit, onPairAnother: () -> Unit, onUnpair: () -> Unit, onSettings: () -> Unit, onPresent: () -> Unit, onCast: () -> Unit, mirroring: Boolean, onMirror: () -> Unit) {
+private fun Header(state: TuraClient.State, net: TuraCore.Net, paired: Boolean, pcName: String?, links: List<TuraCore.PcLink>, selected: String?, onSelect: (String) -> Unit, onPairAnother: () -> Unit, onUnpair: () -> Unit, onSettings: () -> Unit, onPresent: () -> Unit, onGamepad: () -> Unit, onCast: () -> Unit, mirroring: Boolean, onMirror: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("tunnelrat", color = Tura.Text, fontSize = 30.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
@@ -223,10 +243,18 @@ private fun Header(state: TuraClient.State, net: TuraCore.Net, paired: Boolean, 
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Rounded.Slideshow, contentDescription = "Presentation mode", tint = Tura.Text, modifier = Modifier.size(20.dp)) }
             Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier.size(38.dp).clip(CircleShape).background(Tura.Surface).border(1.dp, Tura.Line, CircleShape).clickable(onClick = onGamepad),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Rounded.SportsEsports, contentDescription = "Gamepad mode", tint = Tura.Text, modifier = Modifier.size(20.dp)) }
+            Spacer(Modifier.width(8.dp))
         }
         val (label, dot) = when {
             !paired -> "not paired" to Tura.Muted
+            state is TuraClient.State.Connected && state.host == TuraClient.BLUETOOTH ->
+                "${state.hostname ?: pcName ?: "PC"} · Bluetooth" to Tura.Ok
             state is TuraClient.State.Connected -> (state.hostname ?: pcName ?: "connected") to Tura.Ok
+            state is TuraClient.State.Connecting && state.host == TuraClient.BLUETOOTH -> "${pcName ?: "PC"} · Bluetooth…" to Tura.Amber
             net == TuraCore.Net.MobileOnly -> "no Wi-Fi" to Tura.Danger
             net == TuraCore.Net.None -> "no network" to Tura.Danger
             state is TuraClient.State.Connecting -> "${pcName ?: "PC"} · digging…" to Tura.Amber
@@ -271,6 +299,7 @@ private fun Header(state: TuraClient.State, net: TuraCore.Net, paired: Boolean, 
                 DropdownMenuItem(text = { Text("PC screen", color = Tura.Text) }, onClick = { menu = false; onCast() })
                 DropdownMenuItem(text = { Text(if (mirroring) "Stop showing phone on PC" else "Show phone on PC", color = Tura.Text) }, onClick = { menu = false; onMirror() })
                 DropdownMenuItem(text = { Text("Presentation mode", color = Tura.Text) }, onClick = { menu = false; onPresent() })
+                DropdownMenuItem(text = { Text("Gamepad mode", color = Tura.Text) }, onClick = { menu = false; onGamepad() })
                 DropdownMenuItem(text = { Text("Settings", color = Tura.Text) }, onClick = { menu = false; onSettings() })
                 DropdownMenuItem(text = { Text("Unpair ${pcName ?: "this PC"}", color = Tura.Danger) }, onClick = { menu = false; onUnpair() })
             }
