@@ -52,8 +52,12 @@ if [ "$system" = 1 ]; then
           gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-gtk4 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
           gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gir1.2-gdkpixbuf-2.0 openssl fuse3 avahi-daemon
           libxkbcommon0 ethtool xdg-desktop-portal xdg-desktop-portal-kde wl-clipboard"
-    # Deskflow is optional; it is only needed for shared mouse/keyboard.
-    if available deskflow; then want="$want deskflow"; else warn "deskflow is not in the configured apt repositories; shared mouse/keyboard will be unavailable."; fi
+    # Deskflow is optional. Tunnelrat needs the upstream deskflow-core binary;
+    # Debian trixie currently ships the incompatible legacy deskflow-server/client
+    # interface, so do not install it as a false fix.
+    if ! has deskflow-core; then
+        warn "Shared mouse/keyboard needs deskflow-core. Install the current Debian build from https://github.com/deskflow/deskflow/releases."
+    fi
     if available xclip; then want="$want xclip"; fi
     if available libkscreen-bin; then want="$want libkscreen-bin"; fi
     if available x11-xserver-utils; then want="$want x11-xserver-utils"; fi

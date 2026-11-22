@@ -24,7 +24,7 @@ Rust 1.85 or newer is required. A full setup may request `sudo` to install packa
 | Screen power | Uses `kscreen-doctor --dpms off` on KDE Wayland or `xset dpms force off` on KDE X11. |
 | Startup | A lingering user service starts the daemon at boot; the Plasma autostart helper imports desktop-session variables and restarts it when you log in. |
 | GNOME top-bar chips | Not provided in Plasma. Manage paired devices with the desktop app or `tura devices`. |
-| Shared mouse and keyboard | Requires Deskflow plus compatible KDE portal/input capture support. |
+| Shared mouse and keyboard | Requires Deskflow's `deskflow-core` binary and compatible KDE portal/input capture support. Debian Trixie's `deskflow` 1.22 package uses the older `deskflow-server`/`deskflow-client` interface; install the current Debian build from [Deskflow releases](https://github.com/deskflow/deskflow/releases). This feature becomes active when another PC joins. |
 
 Check missing runtime dependencies and device readiness with:
 

@@ -97,7 +97,7 @@ impl Deskflow {
     pub fn state(&self) -> (bool, String) {
         use std::sync::atomic::Ordering::SeqCst;
         if !Self::available() {
-            return (false, "Deskflow isn't installed (sudo apt install deskflow)".into());
+            return (false, "Deskflow core is missing; install the current Debian build from github.com/deskflow/deskflow/releases".into());
         }
         if !*self.enabled.borrow() {
             return (true, "Off in the settings".into());
