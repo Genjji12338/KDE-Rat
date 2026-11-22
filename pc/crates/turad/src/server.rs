@@ -1238,9 +1238,9 @@ async fn status(ctx: &Ctx) -> Vec<tura_proto::StatusItem> {
     let mut items = vec![];
 
     items.push(item(
-        "GNOME extension",
+        "Desktop clipboard",
         ctx.shell.active(),
-        if ctx.shell.active() { "Connected: clipboard and top-bar chips work".into() } else { "Not running: install and enable tunnelrat@tunnelrat.dev, then log in again".into() },
+        if ctx.shell.active() { "Clipboard bridge available in this desktop session".into() } else { "No supported clipboard tool: install wl-clipboard (Wayland) or xclip (X11)".into() },
     ));
     let input = ctx.input.lock().unwrap_or_else(|p| p.into_inner()).get().is_ok();
     items.push(item("Mouse & keyboard from devices", input, if input { "Can type and move the pointer".into() } else { "No access to /dev/uinput (see the uinput rule in the README)".into() }));

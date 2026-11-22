@@ -6,7 +6,7 @@ CLI / short tag: `tura`.
 ## Decisions
 - **Phone:** Android only. Kotlin + Jetpack Compose. Custom design: dark, bold, card-based, big touch targets.
 - **PC:** Rust daemon (`turad`) running as a systemd user service, plus the `tura` CLI.
-- **Target PC:** Ubuntu with GNOME on Wayland.
+- **Target PC:** Debian with KDE Plasma (Wayland and X11); GNOME remains supported upstream.
 
 ## Architecture
 
@@ -19,7 +19,7 @@ CLI / short tag: `tura`.
 
 ### PC (`turad`)
 - **Mouse and keyboard:** injected through `uinput`, so it works on Wayland and on the login screen. Needs a udev rule plus a group.
-- **Power:** shutdown, reboot, suspend and lock through the logind D-Bus API, allowed by a polkit rule. Suspend is opt-in (`turad --allow-suspend`) because some GPUs never resume from S3 (seen with an AMD RX 6700 XT). "Screen off" (Mutter DPMS) is the safe default instead.
+- **Power:** shutdown, reboot, suspend and lock through the logind D-Bus API, allowed by a polkit rule. Suspend is opt-in (`turad --allow-suspend`) because some GPUs never resume from S3 (seen with an AMD RX 6700 XT). Screen off uses KScreen on KDE and Mutter DPMS on GNOME.
 - **Wake on LAN:** the phone sends the magic packet; the PC tells the phone its MAC address during pairing. The PC needs wired Ethernet, WoL on in the BIOS, and `nmcli ... 802-3-ethernet.wake-on-lan magic`.
 - **Discovery:** turad announces `_tunnelrat._tcp` through Avahi (TXT `fp=` certificate fingerprint); the app looks for its paired PC while on Wi-Fi and not connected, and moves the found address to the front (done). A joined PC (`tura join`) looks the other PC up by name the same way when none of its addresses answer (done).
 - **Settings:** one small GTK4/libadwaita settings window. Otherwise the PC side stays out of sight.
@@ -60,7 +60,7 @@ Later, not committed: phone as webcam. (Access over the Ratlines mesh is handled
    - Polkit rule for power actions (tunnelrat group).
    - uinput access at the login screen: `groupadd -f uinput`, `usermod -aG uinput $USER`, the 60-tunnelrat-uinput.rules udev rule, `udevadm control --reload && udevadm trigger --name-match=uinput`.
    - Wake on LAN on the wired connection: `nmcli connection modify <wired> 802-3-ethernet.wake-on-lan magic` (NetworkManager's "default" can leave the card unable to wake the PC, seen with r8169), plus `ethtool -s <iface> wol g` for the running boot. BIOS: Wake on LAN / PCIe power-on enabled.
-   - Phone (over USB, once): `adb shell appops set dev.tunnelrat PROJECT_MEDIA allow` so mirroring starts without Android's prompt; point the user to the "Tunnelrat: control from PC" accessibility setting.
+   - Phone (over USB, optional): use ADB to install or inspect the app. Keep Android's screen-capture prompt enabled and let the user approve each screen-sharing session; don't set `PROJECT_MEDIA` to `allow` automatically. Point the user to the "Tunnelrat: control from PC" accessibility setting when PC-side control is wanted.
 
 ## Open questions
 - Is the PC that should be woken on wired Ethernet?

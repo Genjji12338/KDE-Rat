@@ -4,7 +4,7 @@
 # Needs the repository working copy (with its index signing key, config.yml
 # and keystore.p12, which never leave this PC) and Docker for fdroidserver.
 #   FDROID_REPO=~/tunnelrat-fdroid FDROIDSERVER=~/fdroid-test/fdroidserver fdroid/update-repo.sh
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-only
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 work=${FDROID_REPO:-$HOME/tunnelrat-fdroid}

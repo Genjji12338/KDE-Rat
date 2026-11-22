@@ -12,6 +12,7 @@
 //! needs a hard power-off. Remote-suspending such a PC would strand it.
 
 use anyhow::{Context, Result, bail};
+use tokio::process::Command;
 use tura_proto::PowerAction;
 use zbus::Connection;
 
@@ -126,6 +127,28 @@ const POWER_SAVE_ON: i32 = 0;
 /// stay black forever. The watch is armed *before* blanking; if arming fails we
 /// never blank.
 async fn screen_off() -> Result<()> {
+    // KDE's native screen-power interface wakes again on user input.
+    if std::env::var_os("XDG_CURRENT_DESKTOP")
+        .is_some_and(|v| v.to_string_lossy().contains("KDE"))
+    {
+        let (program, args): (&str, &[&str]) = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            ("kscreen-doctor", &["--dpms", "off"])
+        } else if std::env::var_os("DISPLAY").is_some() {
+            ("xset", &["dpms", "force", "off"])
+        } else {
+            bail!("KDE screen-off needs an active Wayland or X11 session");
+        };
+        let status = Command::new(program)
+            .args(args)
+            .status()
+            .await
+            .with_context(|| format!("running {program}"))?;
+        if !status.success() {
+            bail!("{program} failed to turn the screen off ({status})");
+        }
+        return Ok(());
+    }
+
     let conn = Connection::session().await.context("connecting to the session D-Bus")?;
 
     let idle = zbus::Proxy::new(&conn, IDLE, IDLE_PATH, IDLE).await.context("Mutter IdleMonitor")?;

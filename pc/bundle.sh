@@ -2,7 +2,7 @@
 # Builds dist/tunnelrat-pc.tar.gz: prebuilt turad and tura plus everything
 # pc/setup.sh needs, for PCs without Rust or the source. On the other PC:
 #   tar xzf tunnelrat-pc.tar.gz && tunnelrat/pc/setup.sh
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-only
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "$here")

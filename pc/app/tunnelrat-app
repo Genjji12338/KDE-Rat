@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Tunnelrat — the PC app. SPDX-License-Identifier: GPL-3.0-or-later
+# Tunnelrat — the PC app. SPDX-License-Identifier: GPL-3.0-only
 """Tunnelrat on the PC: devices and pairing, screens and power, the shared
 mouse layout, settings and a status checklist. Talks to turad over its
 owner-only Unix socket (the same one the `tura` command uses)."""

@@ -7,7 +7,7 @@
 //! Security comes from the TLS layer, not Bluetooth pairing: the phone needn't
 //! be paired with the PC in the system's Bluetooth settings.
 //!
-//! SPDX-License-Identifier: GPL-3.0-or-later
+//! SPDX-License-Identifier: GPL-3.0-only
 
 use std::collections::HashMap;
 use std::sync::Arc;

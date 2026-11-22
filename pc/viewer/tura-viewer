@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# tura-viewer — part of Tunnelrat. SPDX-License-Identifier: GPL-3.0-or-later
+# tura-viewer — part of Tunnelrat. SPDX-License-Identifier: GPL-3.0-only
 """Shows a phone's or PC's screen (H.264) in a window and passes mouse and
 keyboard input back: as touch gestures for a phone (--mode phone), as
 pointer, button, wheel and key events for a PC (--mode pc).

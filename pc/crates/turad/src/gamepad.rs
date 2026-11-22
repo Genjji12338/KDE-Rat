@@ -2,7 +2,7 @@
 //! so games and Steam see a normal gamepad. One per phone, created on its
 //! first `Gamepad` message and unplugged on `GamepadEnd` or disconnect.
 //!
-//! SPDX-License-Identifier: GPL-3.0-or-later
+//! SPDX-License-Identifier: GPL-3.0-only
 
 use anyhow::{Context, Result};
 use evdev::uinput::VirtualDevice;

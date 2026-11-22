@@ -1,5 +1,5 @@
 #!/bin/sh
-# Tunnelrat setup for this PC (Ubuntu with GNOME). Run from the repository:
+# Tunnelrat setup for Debian with KDE Plasma. Run from this bundle:
 #
 #   pc/setup.sh              everything
 #   pc/setup.sh --no-system  skip the parts that need sudo (packages, rules)
@@ -9,7 +9,7 @@
 # Tunnelrat's own files and leaves everything else alone. Asks for your
 # password once, for the system parts.
 #
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-only
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -34,21 +34,30 @@ installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install o
 available() { apt-cache show "$1" >/dev/null 2>&1; }
 
 [ "$(id -u)" -ne 0 ] || { echo "Run this as yourself, not with sudo: it asks for your password when it needs it." >&2; exit 1; }
-has apt-get || { echo "This setup is for Ubuntu (apt)." >&2; exit 1; }
-case "${XDG_CURRENT_DESKTOP:-}" in
-    *GNOME*) ;;
-    *) warn "This isn't a GNOME session: clipboard, top-bar chips and screen sharing need GNOME." ;;
+has apt-get || { echo "Debian or Ubuntu with apt is required." >&2; exit 1; }
+if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    case "${ID:-}" in debian|ubuntu|linuxmint|neon) ;; *) warn "Untested distribution: ${PRETTY_NAME:-unknown}; continuing because apt is available." ;; esac
+fi
+case ":${XDG_CURRENT_DESKTOP:-}:" in
+    *:KDE:*) ;;
+    *) warn "KDE Plasma was not detected; the KDE portal backend may not be installed." ;;
 esac
 relogin=0
 
 # ── 1. Packages ───────────────────────────────────────────────────────────
 if [ "$system" = 1 ]; then
     step "Packages"
-    want="deskflow gstreamer1.0-tools gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+    want="gstreamer1.0-tools gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good
           gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-gtk4 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
           gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gir1.2-gdkpixbuf-2.0 openssl fuse3 avahi-daemon
-          libxkbcommon0 ethtool"
-    # Hardware video encoding (VA-API), where Ubuntu ships it.
+          libxkbcommon0 ethtool xdg-desktop-portal xdg-desktop-portal-kde wl-clipboard"
+    # Deskflow is optional; it is only needed for shared mouse/keyboard.
+    if available deskflow; then want="$want deskflow"; else warn "deskflow is not in the configured apt repositories; shared mouse/keyboard will be unavailable."; fi
+    if available xclip; then want="$want xclip"; fi
+    if available libkscreen-bin; then want="$want libkscreen-bin"; fi
+    if available x11-xserver-utils; then want="$want x11-xserver-utils"; fi
+    # Hardware video encoding (VA-API), where the distribution ships it.
     for opt in gstreamer1.0-plugins-extra gstreamer1.0-plugins-bad; do
         available "$opt" && want="$want $opt"
     done
@@ -68,16 +77,14 @@ fi
 
 # ── 2. Programs ───────────────────────────────────────────────────────────
 step "Tunnelrat programs"
-if [ -x "$here/bin/turad" ]; then
-    src="$here/bin" # a release bundle
-elif has cargo || [ -x "$HOME/.cargo/bin/cargo" ]; then
+if [ -f "$here/Cargo.toml" ] && { has cargo || [ -x "$HOME/.cargo/bin/cargo" ]; }; then
     cargo=$(command -v cargo || echo "$HOME/.cargo/bin/cargo")
-    note "Building (cargo build --release)…"
-    (cd "$here" && "$cargo" build --release --quiet)
+    note "Building the adapted source (cargo build --release)…"
+    (cd "$here" && "$cargo" build --release --locked --quiet)
     src="$here/target/release"
 else
-    echo "No Rust to build with and no prebuilt binaries in $here/bin." >&2
-    echo "Install Rust (https://rustup.rs) and run this again." >&2
+    echo "Rust 1.85 or newer is required to build the included edition-2024 source workspace." >&2
+    echo "Install a current Rust toolchain, then run this setup again." >&2
     exit 1
 fi
 mkdir -p "$bin"
@@ -90,7 +97,7 @@ sh "$here/app/install.sh" >/dev/null
 note "Installed turad, tura, tura-viewer and the Tunnelrat app in $bin"
 case ":$PATH:" in
     *":$bin:"*) ;;
-    *) warn "$bin isn't on your PATH yet; it is after logging in again (Ubuntu's ~/.profile adds it)." ;;
+    *) warn "$bin isn't on your PATH yet; add it to PATH or log in again." ;;
 esac
 
 # ── 3. Service ────────────────────────────────────────────────────────────
@@ -114,27 +121,29 @@ if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]; t
     fi
 fi
 
-# ── 4. GNOME extension ────────────────────────────────────────────────────
-step "GNOME extension (clipboard, top-bar chips)"
-ext="tunnelrat@tunnelrat.dev"
-dest="$HOME/.local/share/gnome-shell/extensions/$ext"
-mkdir -p "$dest"
-cp -r "$here/gnome-extension/$ext/." "$dest/"
-if ! gnome-extensions enable "$ext" 2>/dev/null; then
-    # GNOME only knows new extensions after logging in again: pre-enable it.
-    if has gsettings; then
-        python3 - "$ext" <<'EOF'
-import ast, subprocess, sys
-ext = sys.argv[1]
-cur = subprocess.run(["gsettings", "get", "org.gnome.shell", "enabled-extensions"], capture_output=True, text=True).stdout.strip()
-lst = ast.literal_eval(cur.replace("@as ", "")) if cur else []
-if ext not in lst:
-    subprocess.run(["gsettings", "set", "org.gnome.shell", "enabled-extensions", str(lst + [ext])], check=True)
+# ── 4. Desktop integration ────────────────────────────────────────────────
+# Environment inherited by a lingering user service at boot may not contain
+# graphical-session variables. Import them and restart turad at Plasma login.
+step "KDE Plasma integration"
+mkdir -p "$HOME/.config/autostart" "$HOME/.local/bin"
+session_start="$HOME/.local/bin/tunnelrat-session-start"
+cat > "$session_start" <<'EOF'
+#!/bin/sh
+systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XAUTHORITY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP 2>/dev/null || true
+systemctl --user restart turad 2>/dev/null || true
 EOF
-    fi
-    relogin=1
-fi
-note "Installed and enabled"
+chmod 755 "$session_start"
+cat > "$HOME/.config/autostart/tunnelrat-session.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Tunnelrat session setup
+Comment=Connect Tunnelrat to the Plasma clipboard and desktop session
+Exec=$session_start
+X-KDE-autostart-after=panel
+EOF
+note "Plasma login imports the display variables and restarts turad for clipboard access."
+note "The KDE portal handles screen sharing where its RemoteDesktop features are supported."
+note "GNOME top-bar device chips are not available in Plasma."
 
 # ── 5. System rules ───────────────────────────────────────────────────────
 if [ "$system" = 1 ]; then
@@ -185,11 +194,10 @@ if [ "$phone" = 1 ] && [ -x "$adb" ] && "$adb" get-state >/dev/null 2>&1; then
         "$adb" install -r "$apk" >/dev/null && note "Installed the app ($(basename "$apk"))"
     fi
     if "$adb" shell pm path dev.tunnelrat >/dev/null 2>&1; then
-        "$adb" shell appops set dev.tunnelrat PROJECT_MEDIA allow
-        note "Showing the phone on the PC starts without Android's prompt"
+        note "Screen capture uses Android's standard approval prompt"
         note "For control from the PC: phone Settings → Accessibility → Tunnelrat: control from PC"
     else
-        warn "The Tunnelrat app isn't on the phone yet (build it: cd android && ./gradlew assembleDebug)"
+        note "Tunnelrat is not installed on the phone. Install it from the project's F-Droid repository or releases, then reconnect over USB to enable prompt-free mirroring."
     fi
 fi
 
@@ -199,7 +207,7 @@ sleep 2
 "$bin/tura" status || true
 echo
 if [ "$relogin" = 1 ]; then
-    printf '\033[1mLog out and back in once\033[0m (new groups and the GNOME extension take effect then).\n'
+    printf '\033[1mLog out and back in once\033[0m (new group membership takes effect then).\n'
 fi
 echo "Pair a phone: open Tunnelrat from the app grid → Pair a device, and scan the code in the phone app."
 echo "Join another PC to this one: Pair a device here → Copy code, then run it on the other PC."

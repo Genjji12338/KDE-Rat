@@ -5,7 +5,7 @@ members = ["crates/tura-proto", "crates/turad", "crates/tura"]
 [workspace.package]
 version = "0.4.0"
 edition = "2024"
-license = "GPL-3.0-or-later"
+license = "GPL-3.0-only"
 
 [workspace.dependencies]
 tura-proto = { path = "crates/tura-proto" }

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds the signed release APK into dist/tunnelrat-<version>.apk.
 # The signing key lives outside the repository (see app/build.gradle.kts).
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-only
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here"

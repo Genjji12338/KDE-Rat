@@ -3,7 +3,7 @@
 # new commit on the `public` branch, whose history starts clean at 0.2.0, so
 # the private development history never leaves this PC.
 #   ./publish.sh "message"          then optionally: git tag -a vX.Y.Z public
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-only
 set -eu
 msg=${1:?usage: ./publish.sh "commit message"}
 [ -z "$(git status --porcelain)" ] || { echo "Commit or stash your changes first." >&2; exit 1; }
