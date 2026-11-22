@@ -227,13 +227,18 @@ async fn read_clipboard(backend: Backend) -> Result<Option<String>> {
     .await
     .context("clipboard read timed out")??;
     if !output.status.success() {
-        // wl-paste uses exit status 1 for the normal empty-selection state.
-        // Keep the bridge healthy, but do not overwrite the other devices'
+        // wl-paste uses exit status 1 when the selection is empty or has no
+        // text/plain representation (for example, an image-only clipboard).
+        // Keep the bridge healthy, but do not overwrite other devices'
         // clipboards with an empty string.
-        if matches!(backend, Backend::Wayland)
-            && String::from_utf8_lossy(&output.stderr).trim() == "Nothing is copied"
-        {
-            return Ok(None);
+        if matches!(backend, Backend::Wayland) {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let message = stderr.trim();
+            if message == "Nothing is copied"
+                || message.starts_with("Clipboard content is not available as requested type")
+            {
+                return Ok(None);
+            }
         }
         bail!("clipboard reader exited with {}", output.status);
     }
