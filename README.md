@@ -12,9 +12,13 @@ cd KDE-Rat/pc
 
 The installer builds the PC tools from source, installs the GTK desktop app and viewer, enables the user service, and configures Plasma login autostart for the desktop session. It can install system packages and permissions with `sudo`; see [the Debian/KDE guide](README-DEBIAN-KDE.md) before running it.
 
-## Upstream and contributors
+## Contributors
 
-KDE Rat is a downstream adaptation of Tunnelrat by [I232826](https://github.com/I232826). See [CONTRIBUTORS.md](CONTRIBUTORS.md) for attribution and the scope of the KDE Rat changes.
+- [I232826](https://github.com/I232826) — original Tunnelrat author and upstream project maintainer.
+- [Genjji12338](https://github.com/Genjji12338) — KDE Rat maintainer; Debian and KDE Plasma adaptation.
+- OpenAI Codex — AI coding assistance for the KDE integration and documentation; not a GitHub account or legal contributor.
+
+KDE Rat is a downstream adaptation of [Tunnelrat](https://github.com/I232826/tunnelrat). See [CONTRIBUTORS.md](CONTRIBUTORS.md) for attribution details and the scope of the changes.
 
 ## License
 
